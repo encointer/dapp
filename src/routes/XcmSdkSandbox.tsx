@@ -22,21 +22,6 @@ const XcmSdkSandbox = () => {
         >
           XCM Transfer
         </Tabs.Tab>
-        <Tabs.Tab value="assets" leftSection={<IconCoins style={iconStyle} />}>
-          Assets
-        </Tabs.Tab>
-        <Tabs.Tab
-          value="pallets"
-          leftSection={<IconBoxAlignBottomRight style={iconStyle} />}
-        >
-          Pallets
-        </Tabs.Tab>
-        <Tabs.Tab
-          value="hrmp-channels"
-          leftSection={<IconArrowsUpDown style={iconStyle} />}
-        >
-          HRMP Channels
-        </Tabs.Tab>
       </Tabs.List>
 
       <Container p="xl">
@@ -44,17 +29,6 @@ const XcmSdkSandbox = () => {
           <XcmTransfer />
         </Tabs.Panel>
 
-        <Tabs.Panel value="assets">
-          <AssetsQueries />
-        </Tabs.Panel>
-
-        <Tabs.Panel value="pallets">
-          <PalletsQueries />
-        </Tabs.Panel>
-
-        <Tabs.Panel value="hrmp-channels">
-          <ChannelsQueries />
-        </Tabs.Panel>
       </Container>
     </Tabs>
   );
