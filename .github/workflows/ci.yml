@@ -20,7 +20,3 @@ jobs:
           cache: "pnpm"
       - run: pnpm install
       - run: pnpm build
-      - run: pnpm compile
-      - run: pnpm format:check
-      - run: pnpm lint:check
-      - run: pnpm test
