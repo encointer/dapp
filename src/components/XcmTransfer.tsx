@@ -38,13 +38,13 @@ const XcmTransfer = () => {
     if (from === "Polkadot" || from === "Kusama") {
       return Builder(api)
         .to(to as TNode)
-        .amount(amount)
+        .amount(amount * Math.pow(10,12))
         .address(address)
         .build();
     } else if (to === "Polkadot" || to === "Kusama") {
       return Builder(api)
         .from(from as TNode)
-        .amount(amount)
+        .amount(amount* Math.pow(10,12))
         .address(address)
         .build();
     } else {
@@ -52,7 +52,7 @@ const XcmTransfer = () => {
         .from(from)
         .to(to)
         .currency(currency)
-        .amount(amount)
+        .amount(amount * Math.pow(10,12))
         .address(address)
         .build();
     }
@@ -114,7 +114,7 @@ const XcmTransfer = () => {
   return (
     <Stack gap="xl">
       <Stack w="100%" maw={400} mx="auto" gap="lg">
-        <Title order={3}>New XCM transfer</Title>
+        <Title order={3}>Transfer KSM from Encointer to Kusama Relaychain</Title>
         <TransferForm onSubmit={onSubmit} loading={loading} />
       </Stack>
       <Box ref={targetRef}>

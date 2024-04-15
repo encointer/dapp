@@ -3,6 +3,7 @@ import { isValidWalletAddress } from '../utils';
 import { FC } from 'react';
 import { Button, Checkbox, Select, Stack, TextInput } from '@mantine/core';
 import { NODES_WITH_RELAY_CHAINS, TNodeWithRelayChains } from '@paraspell/sdk';
+import {useWallet} from "../providers/WalletProvider.tsx";
 
 export type FormValues = {
   from: TNodeWithRelayChains;
@@ -19,13 +20,14 @@ type Props = {
 };
 
 const TransferForm: FC<Props> = ({ onSubmit, loading }) => {
+  const { selectedAccount } = useWallet();
   const form = useForm<FormValues>({
     initialValues: {
       from: 'Encointer',
       to: 'Kusama',
       currency: 'KSM',
-      amount: '100000000000',
-      address: '',
+      amount: '0.2',
+      address: selectedAccount?.address,
       useApi: false,
     },
 
@@ -43,24 +45,6 @@ const TransferForm: FC<Props> = ({ onSubmit, loading }) => {
   return (
     <form onSubmit={form.onSubmit(onSubmit)}>
       <Stack>
-        <Select
-          label="Origin node"
-          placeholder="Pick value"
-          data={[...NODES_WITH_RELAY_CHAINS]}
-          searchable
-          required
-          {...form.getInputProps('from')}
-        />
-
-        <Select
-          label="Destination node"
-          placeholder="Pick value"
-          data={[...NODES_WITH_RELAY_CHAINS]}
-          searchable
-          required
-          {...form.getInputProps('to')}
-        />
-
         {!isNotParaToPara && (
           <TextInput
             label="Currency"
@@ -71,15 +55,13 @@ const TransferForm: FC<Props> = ({ onSubmit, loading }) => {
         )}
 
         <TextInput
-          label="Recipient address"
+          label="Recipient address on relaychain"
           placeholder="0x0000000"
           required
           {...form.getInputProps('address')}
         />
 
-        <TextInput label="Amount" placeholder="0" required {...form.getInputProps('amount')} />
-
-        <Checkbox label="Use XCM API" {...form.getInputProps('useApi')} />
+        <TextInput label="Amount KSM to send" placeholder="0.1" required {...form.getInputProps('amount')} />
 
         <Button type="submit" loading={loading}>
           Submit transaction
