@@ -22,16 +22,16 @@ import { useWallet } from './providers/WalletProvider';
 import XcmSdkSandbox from './routes/XcmSdkSandbox';
 
 const myColor: MantineColorsTuple = [
-  '#ffe9f6',
-  '#ffd1e6',
-  '#faa1c9',
-  '#f66eab',
-  '#f24391',
-  '#f02881',
-  '#f01879',
-  '#d60867',
-  '#c0005c',
-  '#a9004f',
+  '#eef3ff',
+  '#dce4f5',
+  '#b9c7e2',
+  '#94a8d0',
+  '#748dc1',
+  '#5f7cb8',
+  '#5474b4',
+  '#44639f',
+  '#39588f',
+  '#2d4b81'
 ];
 
 const theme = createTheme({
