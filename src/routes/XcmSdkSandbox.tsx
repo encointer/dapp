@@ -1,14 +1,8 @@
 import { Container, Tabs, rem } from "@mantine/core";
 import {
-  IconArrowsUpDown,
-  IconBoxAlignBottomRight,
-  IconCoins,
   IconSend,
 } from "@tabler/icons-react";
 import XcmTransfer from "../components/XcmTransfer";
-import AssetsQueries from "../components/assets/AssetsQueries";
-import PalletsQueries from "../components/pallets/PalletsQueries";
-import ChannelsQueries from "../components/channels/ChannelsQueries";
 
 const XcmSdkSandbox = () => {
   const iconStyle = { width: rem(12), height: rem(12) };

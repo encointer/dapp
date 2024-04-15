@@ -1,8 +1,8 @@
 import { useForm } from '@mantine/form';
 import { isValidWalletAddress } from '../utils';
 import { FC } from 'react';
-import { Button, Checkbox, Select, Stack, TextInput } from '@mantine/core';
-import { NODES_WITH_RELAY_CHAINS, TNodeWithRelayChains } from '@paraspell/sdk';
+import { Button, Stack, TextInput } from '@mantine/core';
+import { TNodeWithRelayChains } from '@paraspell/sdk';
 import {useWallet} from "../providers/WalletProvider.tsx";
 
 export type FormValues = {
@@ -27,7 +27,7 @@ const TransferForm: FC<Props> = ({ onSubmit, loading }) => {
       to: 'Kusama',
       currency: 'KSM',
       amount: '0.2',
-      address: selectedAccount?.address,
+      address: selectedAccount? selectedAccount.address : '',
       useApi: false,
     },
 
