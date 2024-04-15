@@ -117,23 +117,12 @@ const App = () => {
             </Group>
           </AppShell.Header>
           <AppShell.Navbar p="md">
-            <RouterNavLink to="/" style={{ color: 'black' }}>
-              {({ isActive }) => (
-                <NavLink
-                  component="div"
-                  active={isActive}
-                  label="XCM Router Sandbox"
-                  leftSection={<IconHome2 size="1rem" stroke={1.5} />}
-                  style={{ borderRadius: 4 }}
-                />
-              )}
-            </RouterNavLink>
             <RouterNavLink to="/xcm-sdk-sandbox" style={{ color: 'black' }}>
               {({ isActive }) => (
                 <NavLink
                   component="div"
                   active={isActive}
-                  label="XCM SDK Sandbox"
+                  label="Encointer XCM"
                   leftSection={<IconHome2 size="1rem" stroke={1.5} />}
                   style={{ borderRadius: 4 }}
                 />
