@@ -98,44 +98,21 @@ const App = () => {
             ))}
           </Stack>
         </Modal>
-        <AppShell
-          header={{ height: 60 }}
-          navbar={{ width: 300, breakpoint: 'sm', collapsed: { mobile: !opened } }}
-        >
-          <AppShell.Header>
-            <Group h="100%" px="md" justify="space-between">
-              <Burger opened={opened} onClick={toggle} hiddenFrom="sm" size="sm" />
-              <Image src="logo.png" h="100%" p={8} />
-              {selectedAccount ? (
-                <Button
-                  onClick={onChangeAccountClick}
-                  variant="outline"
-                >{`${selectedAccount.meta.name} (${selectedAccount.meta.source})`}</Button>
-              ) : (
-                <Button onClick={onConnectWalletClick}>Connect wallet</Button>
-              )}
-            </Group>
-          </AppShell.Header>
-          <AppShell.Navbar p="md">
-            <RouterNavLink to="/xcm-sdk-sandbox" style={{ color: 'black' }}>
-              {({ isActive }) => (
-                <NavLink
-                  component="div"
-                  active={isActive}
-                  label="Encointer XCM"
-                  leftSection={<IconHome2 size="1rem" stroke={1.5} />}
-                  style={{ borderRadius: 4 }}
-                />
-              )}
-            </RouterNavLink>
-          </AppShell.Navbar>
-          <AppShell.Main>
-            <Routes>
-              <Route path="/" Component={RouterTransferPage} />
-              <Route path="/xcm-sdk-sandbox" Component={XcmSdkSandbox} />
-            </Routes>
-          </AppShell.Main>
-        </AppShell>
+          <Group h="100%" px="md" justify="space-between">
+            <Image src="logo.png" w="64px" p={8} />
+            {selectedAccount ? (
+              <Button
+                onClick={onChangeAccountClick}
+                variant="outline"
+              >{`${selectedAccount.meta.name} (${selectedAccount.meta.source})`}</Button>
+            ) : (
+              <Button onClick={onConnectWalletClick}>Connect wallet</Button>
+            )}
+          </Group>
+          <Routes>
+            <Route path="/" Component={XcmSdkSandbox} />
+            <Route path="/xcm" Component={XcmSdkSandbox} />
+          </Routes>
       </MantineProvider>
     </BrowserRouter>
   );

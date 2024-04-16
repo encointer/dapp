@@ -10,7 +10,7 @@ export type FormValues = {
   to: TNodeWithRelayChains;
   currency: string;
   address: string;
-  amount: string;
+  amount: number;
   useApi: boolean;
 };
 
@@ -26,7 +26,7 @@ const TransferForm: FC<Props> = ({ onSubmit, loading }) => {
       from: 'Encointer',
       to: 'Kusama',
       currency: 'KSM',
-      amount: '0.2',
+      amount: 0.2,
       address: selectedAccount? selectedAccount.address : '',
       useApi: false,
     },
@@ -36,33 +36,10 @@ const TransferForm: FC<Props> = ({ onSubmit, loading }) => {
     },
   });
 
-  const isNotParaToPara =
-    form.values.from === 'Polkadot' ||
-    form.values.from === 'Kusama' ||
-    form.values.to === 'Polkadot' ||
-    form.values.to === 'Kusama';
-
   return (
     <form onSubmit={form.onSubmit(onSubmit)}>
       <Stack>
-        {!isNotParaToPara && (
-          <TextInput
-            label="Currency"
-            placeholder="GLMR"
-            required
-            {...form.getInputProps('currency')}
-          />
-        )}
-
-        <TextInput
-          label="Recipient address on relaychain"
-          placeholder="0x0000000"
-          required
-          {...form.getInputProps('address')}
-        />
-
         <TextInput label="Amount KSM to send" placeholder="0.1" required {...form.getInputProps('amount')} />
-
         <Button type="submit" loading={loading}>
           Submit transaction
         </Button>
