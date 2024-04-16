@@ -25,3 +25,7 @@ pnpm dev
 ```
 
 This will start the development server. Open the link given during startup to access the playground.
+
+## Acknowledgements
+
+This frontend is based on [paraspell](https://paraspell.github.io/docs/) and [polkadot api](https://polkadot.js.org/docs/api/)
