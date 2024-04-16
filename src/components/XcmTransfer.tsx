@@ -38,13 +38,13 @@ const XcmTransfer = () => {
     if (from === "Polkadot" || from === "Kusama") {
       return Builder(api)
         .to(to as TNode)
-        .amount(Number(amount) * Math.pow(10,12))
+        .amount(Math.floor(Number(amount) * Math.pow(10,12)))
         .address(address)
         .build();
     } else if (to === "Polkadot" || to === "Kusama") {
       return Builder(api)
         .from(from as TNode)
-        .amount(Number(amount) * Math.pow(10,12))
+        .amount(Math.floor(Number(amount) * Math.pow(10,12)))
         .address(address)
         .build();
     } else {
@@ -52,7 +52,7 @@ const XcmTransfer = () => {
         .from(from)
         .to(to)
         .currency(currency)
-        .amount(Number(amount) * Math.pow(10,12))
+        .amount(Math.floor(Number(amount) * Math.pow(10,12)))
         .address(address)
         .build();
     }
