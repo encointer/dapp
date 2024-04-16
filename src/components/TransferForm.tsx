@@ -5,6 +5,7 @@ import {Button, Grid, Stack, TextInput} from '@mantine/core';
 import {createApiInstanceForNode, TNodeWithRelayChains} from '@paraspell/sdk';
 import {useWallet} from "../providers/WalletProvider.tsx";
 import {formatBalance} from "@polkadot/util";
+import { AccountInfo } from '@polkadot/types/interfaces';
 
 export type FormValues = {
   from: TNodeWithRelayChains;
@@ -25,8 +26,8 @@ const TransferForm: FC<Props> = ({ onSubmit, loading }) => {
   const encointerApi = createApiInstanceForNode('Encointer')
   const kusamaApi = createApiInstanceForNode('Kusama')
 
-  const [encointerBalance, setEncointerBalance] = useState();
-  const [kusamaBalance, setKusamaBalance] = useState();
+  const [encointerBalance, setEncointerBalance] = useState<string | undefined>(undefined);
+  const [kusamaBalance, setKusamaBalance] = useState<string | undefined>(undefined);
 
   formatBalance.setDefaults({
     decimals: 12,
@@ -38,36 +39,35 @@ const TransferForm: FC<Props> = ({ onSubmit, loading }) => {
   }, [selectedAccount]);
 
   useEffect(() => {
-    let unsubscribe
     encointerApi.then((api) => {
+      let unsubscribe: AccountInfo | undefined;
       // If the user has selected an address, create a new subscription
       selectedAccount &&
       api.query.system
-          .account(selectedAccount.address, balance =>
+          .account<AccountInfo>(selectedAccount.address, (balance: AccountInfo) =>
           {
             setEncointerBalance(formatBalance(balance.data.free))
-            form.values.amount = Math.max(0, balance.data.free * Math.pow(10, -12) - 0.001)
-          }
-          )
+            form.values.amount = Math.max(0, Number(balance.data.free) * Math.pow(10, -12) - 0.001)
+          })
           .then(unsub => (unsubscribe = unsub))
           .catch(console.error)
-      return () => unsubscribe && unsubscribe()
+      return () => unsubscribe
     })
   }, [selectedAccount, encointerApi]);
 
   useEffect(() => {
-    let unsubscribe
     if (selectedAccount) form.values.address = selectedAccount.address;
+    let unsubscribe: AccountInfo | undefined;
     kusamaApi.then((api) => {
       // If the user has selected an address, create a new subscription
       selectedAccount &&
       api.query.system
-          .account(selectedAccount.address, balance =>
+          .account<AccountInfo>(selectedAccount.address, (balance: AccountInfo) =>
               setKusamaBalance(formatBalance(balance.data.free))
           )
           .then(unsub => (unsubscribe = unsub))
           .catch(console.error)
-      return () => unsubscribe && unsubscribe()
+      return () => unsubscribe
     })
   }, [selectedAccount, kusamaApi]);
 

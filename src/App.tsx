@@ -3,18 +3,15 @@ import './App.css';
 import {
   MantineProvider,
   Image,
-  NavLink,
   createTheme,
   MantineColorsTuple,
   Button,
   Modal,
   Stack,
 } from '@mantine/core';
-import { BrowserRouter, Routes, Route, NavLink as RouterNavLink } from 'react-router-dom';
-import RouterTransferPage from './routes/RouterTransferPage';
+import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { useDisclosure } from '@mantine/hooks';
-import { AppShell, Burger, Group } from '@mantine/core';
-import { IconHome2 } from '@tabler/icons-react';
+import {  Group } from '@mantine/core';
 import { web3Accounts, web3Enable } from '@polkadot/extension-dapp';
 import { InjectedAccountWithMeta } from '@polkadot/extension-inject/types';
 import { useState } from 'react';
@@ -42,7 +39,6 @@ const theme = createTheme({
 });
 
 const App = () => {
-  const [opened, { toggle }] = useDisclosure();
   const [modalOpened, { open: openModal, close: closeModal }] = useDisclosure(false);
 
   const [accounts, setAccounts] = useState<InjectedAccountWithMeta[]>([]);
