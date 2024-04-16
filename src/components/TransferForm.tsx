@@ -6,6 +6,8 @@ import {createApiInstanceForNode, TNodeWithRelayChains} from '@paraspell/sdk';
 import {useWallet} from "../providers/WalletProvider.tsx";
 import {formatBalance} from "@polkadot/util";
 import { AccountInfo } from '@polkadot/types/interfaces';
+import {IntegriteeWorker} from '@encointer/worker-api';
+import {Keyring} from "@polkadot/keyring";
 
 export type FormValues = {
   from: TNodeWithRelayChains;
@@ -29,6 +31,11 @@ const TransferForm: FC<Props> = ({ onSubmit, loading }) => {
   const [encointerBalance, setEncointerBalance] = useState<string | undefined>('loading...');
   const [kusamaBalance, setKusamaBalance] = useState<string | undefined>('loading...');
 
+  const worker = new IntegriteeWorker('wss://scv1.paseo.api.incognitee.io:443', {
+    createWebSocket: (url) => new WebSocket(url),
+    types: {}
+  })
+
   formatBalance.setDefaults({
     decimals: 12,
     unit: 'KSM',
@@ -36,6 +43,41 @@ const TransferForm: FC<Props> = ({ onSubmit, loading }) => {
 
   useEffect(() => {
     if (selectedAccount) form.values.address = selectedAccount.address;
+    worker.getShardVault().then((sk) => {
+      console.log('Vault: ')
+      console.log(sk[0])
+    });
+    const shard = '5wePd1LYa5M49ghwgZXs55cepKbJKhj5xfzQGfPeMS7c';
+    try {
+      const mrenclave = '7RuM6U4DLEtrTnVntDjDPBCAN4LbCGRpnmcTYUGhLqc7';
+      let keyring = new Keyring({type: "sr25519"});
+      let alice = keyring.addFromUri('//Alice', {name: 'Alice default'});
+      let bob = keyring.addFromUri('//Bob', {name: 'Bob default'});
+
+      worker.getBalance(alice, shard)
+          .then((balance) => {
+            console.log(`current account balance L2 for Alice: ${balance}`)
+          });
+      worker.getBalance(bob, shard)
+          .then((balance) => {
+            console.log(`current account balance L2 for Bob: ${balance}`)
+          });
+
+      // this does only call `author_submit`, so we can only know if the trusted call is valid, but we
+      // can't know here if the trusted call has been executed without an error.
+      worker.trustedBalanceTransfer(
+          alice,
+          shard,
+          mrenclave,
+          alice.address,
+          bob.address,
+          1100000000000
+      ).then((hash) => console.log(`trustedOperationHash: ${hash}`));
+
+    } catch (error) {
+      console.log(`Error submitting the trusted operation: ${error}`)
+    }
+
   }, [selectedAccount]);
 
   useEffect(() => {
