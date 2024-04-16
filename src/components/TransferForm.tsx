@@ -26,8 +26,8 @@ const TransferForm: FC<Props> = ({ onSubmit, loading }) => {
   const encointerApi = createApiInstanceForNode('Encointer')
   const kusamaApi = createApiInstanceForNode('Kusama')
 
-  const [encointerBalance, setEncointerBalance] = useState<string | undefined>(undefined);
-  const [kusamaBalance, setKusamaBalance] = useState<string | undefined>(undefined);
+  const [encointerBalance, setEncointerBalance] = useState<string | undefined>('loading...');
+  const [kusamaBalance, setKusamaBalance] = useState<string | undefined>('loading...');
 
   formatBalance.setDefaults({
     decimals: 12,
@@ -40,34 +40,28 @@ const TransferForm: FC<Props> = ({ onSubmit, loading }) => {
 
   useEffect(() => {
     encointerApi.then((api) => {
-      let unsubscribe: AccountInfo | undefined;
+
       // If the user has selected an address, create a new subscription
       selectedAccount &&
       api.query.system
-          .account<AccountInfo>(selectedAccount.address, (balance: AccountInfo) =>
+          .account<AccountInfo>(selectedAccount.address).then((balance: AccountInfo) =>
           {
             setEncointerBalance(formatBalance(balance.data.free))
             form.values.amount = Math.max(0, Number(balance.data.free) * Math.pow(10, -12) - 0.001)
           })
-          .then(unsub => (unsubscribe = unsub))
           .catch(console.error)
-      return () => unsubscribe
     })
   }, [selectedAccount, encointerApi]);
 
   useEffect(() => {
-    if (selectedAccount) form.values.address = selectedAccount.address;
-    let unsubscribe: AccountInfo | undefined;
     kusamaApi.then((api) => {
       // If the user has selected an address, create a new subscription
       selectedAccount &&
       api.query.system
-          .account<AccountInfo>(selectedAccount.address, (balance: AccountInfo) =>
+          .account<AccountInfo>(selectedAccount.address).then((balance: AccountInfo) =>
               setKusamaBalance(formatBalance(balance.data.free))
           )
-          .then(unsub => (unsubscribe = unsub))
           .catch(console.error)
-      return () => unsubscribe
     })
   }, [selectedAccount, kusamaApi]);
 
