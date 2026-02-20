@@ -54,10 +54,16 @@ export type TransferState =
   | { step: 'success' }
   | { step: 'error'; message: string }
 
+export interface FeeDetail {
+  fee: bigint
+  symbol: string
+  decimals: number
+}
+
 export interface HopFee {
   hop: Hop
-  originFee: bigint
-  destinationFee: bigint
+  origin: FeeDetail
+  destination: FeeDetail
 }
 
 export interface BalanceEntry {

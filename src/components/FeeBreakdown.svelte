@@ -2,7 +2,6 @@
   import type { HopFee, TransferParams } from '../lib/types'
   import { getChain, getDecimals } from '../lib/chains'
   import { formatBalance } from '../lib/format'
-  import { totalFees, receiveAmount } from '../lib/transfer.svelte'
 
   interface Props {
     fees: HopFee[]
@@ -10,9 +9,7 @@
   }
   let { fees, params }: Props = $props()
 
-  const decimals = $derived(getDecimals(params.source, params.token))
-  const total = $derived(totalFees(fees))
-  const receive = $derived(receiveAmount(params.amount, fees))
+  const decimals = $derived(getDecimals(params.destination, params.token))
 </script>
 
 <div class="fees card">
@@ -22,18 +19,23 @@
       <span class="fee-label">
         Hop {i + 1}: {getChain(fee.hop.from).name} &rarr; {getChain(fee.hop.to).name}
       </span>
-      <span class="fee-value">
-        ~{formatBalance(fee.originFee + fee.destinationFee, decimals)} {params.token}
-      </span>
     </div>
+    {#if fee.origin.fee > 0n}
+      <div class="fee-row fee-sub">
+        <span class="fee-label">Origin</span>
+        <span class="fee-value">~{formatBalance(fee.origin.fee, fee.origin.decimals)} {fee.origin.symbol}</span>
+      </div>
+    {/if}
+    {#if fee.destination.fee > 0n}
+      <div class="fee-row fee-sub">
+        <span class="fee-label">Destination</span>
+        <span class="fee-value">~{formatBalance(fee.destination.fee, fee.destination.decimals)} {fee.destination.symbol}</span>
+      </div>
+    {/if}
   {/each}
-  <div class="fee-row total">
-    <span>Total fees</span>
-    <span>~{formatBalance(total, decimals)} {params.token}</span>
-  </div>
   <div class="fee-row receive">
     <span>You receive</span>
-    <span>~{formatBalance(receive, decimals)} {params.token}</span>
+    <span>~{formatBalance(params.amount, decimals)} {params.token}</span>
   </div>
 </div>
 
@@ -51,6 +53,10 @@
     padding: 0.2rem 0;
   }
 
+  .fee-sub {
+    padding-left: 1rem;
+  }
+
   .fee-label {
     color: var(--color-text-dim);
   }
@@ -59,14 +65,10 @@
     font-family: var(--font-mono);
   }
 
-  .total {
+  .receive {
     border-top: 1px solid var(--color-border);
     margin-top: 0.3rem;
     padding-top: 0.4rem;
-    font-weight: 500;
-  }
-
-  .receive {
     color: var(--color-success);
     font-weight: 500;
   }
