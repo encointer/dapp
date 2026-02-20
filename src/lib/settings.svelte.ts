@@ -13,7 +13,7 @@ function load(): Settings {
   } catch {
     // ignore
   }
-  return { providerMode: 'smoldot' }
+  return { providerMode: 'rpc' }
 }
 
 function save(s: Settings) {
