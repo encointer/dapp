@@ -58,6 +58,7 @@ export interface FeeDetail {
   fee: bigint
   symbol: string
   decimals: number
+  quoted?: { fee: bigint; symbol: string; decimals: number }
 }
 
 export interface HopFee {

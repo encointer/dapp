@@ -3,7 +3,22 @@ import type { PolkadotSigner } from 'polkadot-api'
 import type { TransferParams, TransferState, HopFee, HopProgress, Route, FeeDetail } from './types'
 import { resolveRoute } from './routing'
 import { toParaSpell, getCurrency } from './chains'
-import { getApiOverrides } from './provider.svelte'
+import { getApiOverrides, getClient } from './provider.svelte'
+
+// KSM location on KAH (from relay parent)
+const KSM_LOCATION = { parents: 1, interior: 'Here' }
+// USDC location on KAH (local pallet-assets, bridged from PAH)
+const USDC_KAH_LOCATION = {
+  parents: 2,
+  interior: {
+    X4: [
+      { GlobalConsensus: { Polkadot: null } },
+      { Parachain: 1000 },
+      { PalletInstance: 50 },
+      { GeneralIndex: 1337 },
+    ],
+  },
+}
 
 let transferState = $state<TransferState>({ step: 'idle' })
 
@@ -11,6 +26,28 @@ function builder() {
   const overrides = getApiOverrides()
   if (!overrides) throw new Error('Not connected to chains')
   return Builder({ apiOverrides: overrides })
+}
+
+async function quoteKsmToUsdc(ksmAmount: bigint): Promise<bigint | null> {
+  if (ksmAmount <= 0n) return null
+  const client = getClient('kah')
+  if (!client) return null
+  try {
+    const api = client.getUnsafeApi()
+    const result = await api.apis.AssetConversionApi.quote_price_exact_tokens_for_tokens(
+      KSM_LOCATION, USDC_KAH_LOCATION, ksmAmount, true,
+    )
+    return result != null ? BigInt(result) : null
+  } catch {
+    return null
+  }
+}
+
+async function enrichWithQuote(detail: FeeDetail): Promise<FeeDetail> {
+  if (detail.fee <= 0n || detail.symbol !== 'KSM') return detail
+  const quoted = await quoteKsmToUsdc(detail.fee)
+  if (quoted == null) return detail
+  return { ...detail, quoted: { fee: quoted, symbol: 'USDC', decimals: 6 } }
 }
 
 function extractFee(detail: { fee?: bigint; asset: { symbol?: string; decimals?: number } }): FeeDetail {
@@ -46,11 +83,11 @@ export async function estimateFees(
         .senderAddress(senderAddress)
         .getXcmFee()
 
-      fees.push({
-        hop,
-        origin: extractFee(feeResult.origin),
-        destination: extractFee(feeResult.destination),
-      })
+      const [origin, destination] = await Promise.all([
+        enrichWithQuote(extractFee(feeResult.origin)),
+        enrichWithQuote(extractFee(feeResult.destination)),
+      ])
+      fees.push({ hop, origin, destination })
     }
 
     transferState = { step: 'ready', fees }

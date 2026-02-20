@@ -23,13 +23,23 @@
     {#if fee.origin.fee > 0n}
       <div class="fee-row fee-sub">
         <span class="fee-label">Origin</span>
-        <span class="fee-value">~{formatBalance(fee.origin.fee, fee.origin.decimals)} {fee.origin.symbol}</span>
+        <span class="fee-value">
+          ~{formatBalance(fee.origin.fee, fee.origin.decimals)} {fee.origin.symbol}
+          {#if fee.origin.quoted}
+            <span class="quoted">(~{formatBalance(fee.origin.quoted.fee, fee.origin.quoted.decimals)} {fee.origin.quoted.symbol})</span>
+          {/if}
+        </span>
       </div>
     {/if}
     {#if fee.destination.fee > 0n}
       <div class="fee-row fee-sub">
         <span class="fee-label">Destination</span>
-        <span class="fee-value">~{formatBalance(fee.destination.fee, fee.destination.decimals)} {fee.destination.symbol}</span>
+        <span class="fee-value">
+          ~{formatBalance(fee.destination.fee, fee.destination.decimals)} {fee.destination.symbol}
+          {#if fee.destination.quoted}
+            <span class="quoted">(~{formatBalance(fee.destination.quoted.fee, fee.destination.quoted.decimals)} {fee.destination.quoted.symbol})</span>
+          {/if}
+        </span>
       </div>
     {/if}
   {/each}
@@ -63,6 +73,11 @@
 
   .fee-value {
     font-family: var(--font-mono);
+  }
+
+  .quoted {
+    color: var(--color-text-dim);
+    font-size: 0.8rem;
   }
 
   .receive {
