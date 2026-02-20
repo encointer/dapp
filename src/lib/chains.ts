@@ -1,3 +1,4 @@
+import type { TCurrencyCore } from '@paraspell/sdk'
 import type { ChainConfig, ChainId, TokenSymbol, ParaSpellChain } from './types'
 
 export const CHAINS: Record<ChainId, ChainConfig> = {
@@ -21,7 +22,23 @@ export const CHAINS: Record<ChainId, ChainConfig> = {
     ],
     tokens: [
       { symbol: 'KSM', decimals: 12 },
-      { symbol: 'USDC', decimals: 6 },
+      {
+        symbol: 'USDC',
+        decimals: 6,
+        currency: {
+          location: {
+            parents: 2,
+            interior: {
+              X4: [
+                { GlobalConsensus: { Polkadot: null } },
+                { Parachain: 1000 },
+                { PalletInstance: 50 },
+                { GeneralIndex: 1337 },
+              ],
+            },
+          },
+        },
+      },
     ],
   },
   pah: {
@@ -58,4 +75,9 @@ export function getDecimals(chainId: ChainId, token: TokenSymbol): number {
 
 export function toParaSpell(chainId: ChainId): ParaSpellChain {
   return CHAINS[chainId].paraSpellName
+}
+
+export function getCurrency(chainId: ChainId, token: TokenSymbol): TCurrencyCore {
+  const t = CHAINS[chainId].tokens.find(t => t.symbol === token)
+  return t?.currency ?? { symbol: token }
 }

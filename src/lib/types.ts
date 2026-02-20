@@ -1,4 +1,5 @@
 import type { PolkadotSigner } from 'polkadot-api'
+import type { TCurrencyCore } from '@paraspell/sdk'
 
 export type ChainId = 'encointer' | 'kah' | 'pah'
 export type TokenSymbol = 'KSM' | 'USDC'
@@ -17,6 +18,7 @@ export interface ChainConfig {
 export interface TokenConfig {
   symbol: TokenSymbol
   decimals: number
+  currency?: TCurrencyCore
 }
 
 export interface Route {

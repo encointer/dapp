@@ -1,6 +1,7 @@
 import { getBalance, getExistentialDeposit } from '@paraspell/sdk'
-import { CHAINS, CHAIN_IDS } from './chains'
+import { CHAINS, CHAIN_IDS, getCurrency } from './chains'
 import { getApiOverrides } from './provider.svelte'
+import type { TCurrencyCore } from '@paraspell/sdk'
 import type { ChainId, TokenSymbol, BalanceEntry, ParaSpellChain } from './types'
 import type { PolkadotClient } from 'polkadot-api'
 
@@ -9,8 +10,8 @@ let loading = $state(false)
 let lastError = $state<string | null>(null)
 let refreshTimer: ReturnType<typeof setInterval> | null = null
 
-function ed(chain: ParaSpellChain, token: TokenSymbol): bigint {
-  const result = getExistentialDeposit(chain, { symbol: token })
+function ed(chain: ParaSpellChain, currency: TCurrencyCore): bigint {
+  const result = getExistentialDeposit(chain, currency)
   return result ?? 0n
 }
 
@@ -24,14 +25,15 @@ async function fetchBalance(
   const api = apiOverrides[paraSpell]
 
   try {
+    const currency = getCurrency(chainId, token)
     const free = await getBalance({
       address,
       chain: paraSpell,
-      currency: { symbol: token },
+      currency,
       ...(api ? { api } : {}),
     })
 
-    const existential = ed(paraSpell, token)
+    const existential = ed(paraSpell, currency)
     const transferable = free > existential ? free - existential : 0n
 
     return { chain: chainId, token, free, transferable }
