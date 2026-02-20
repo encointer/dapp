@@ -51,7 +51,7 @@ export const CHAINS: Record<ChainId, ChainConfig> = {
     ],
     tokens: [
       { symbol: 'KSM', decimals: 12 },
-      { symbol: 'USDC', decimals: 6 },
+      { symbol: 'USDC', decimals: 6, currency: { id: 1337 } },
     ],
   },
 }
