@@ -1,4 +1,4 @@
-import type { TCurrencyCore } from '@paraspell/sdk'
+import { Native, Foreign, type TCurrencyCore } from '@paraspell/sdk'
 import type { ChainConfig, ChainId, TokenSymbol, ParaSpellChain } from './types'
 
 export const CHAINS: Record<ChainId, ChainConfig> = {
@@ -21,7 +21,7 @@ export const CHAINS: Record<ChainId, ChainConfig> = {
       'wss://kusama-asset-hub-rpc.polkadot.io',
     ],
     tokens: [
-      { symbol: 'KSM', decimals: 12 },
+      { symbol: 'KSM', decimals: 12, currency: { symbol: Native('KSM') } },
       {
         symbol: 'USDC',
         decimals: 6,
@@ -50,7 +50,7 @@ export const CHAINS: Record<ChainId, ChainConfig> = {
       'wss://polkadot-asset-hub-rpc.polkadot.io',
     ],
     tokens: [
-      { symbol: 'KSM', decimals: 12 },
+      { symbol: 'KSM', decimals: 12, currency: { symbol: Foreign('KSM') } },
       { symbol: 'USDC', decimals: 6, currency: { id: 1337 } },
     ],
   },
