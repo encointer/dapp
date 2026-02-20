@@ -2,7 +2,7 @@
   import type { ChainId, TokenSymbol, TransferParams } from '../lib/types'
   import { CHAINS, CHAIN_IDS, chainHasToken, getDecimals } from '../lib/chains'
   import { getWalletState } from '../lib/wallet.svelte'
-  import { getBalances, isLoading as balancesLoading, fetchAllBalances } from '../lib/balances.svelte'
+  import { getBalances, isLoading as balancesLoading } from '../lib/balances.svelte'
   import { getDestinations, detectSource } from '../lib/routing'
   import { parseAmount } from '../lib/format'
   import BalanceCard from '../components/BalanceCard.svelte'
@@ -93,11 +93,7 @@
       <div class="section-header">
         <h2>Your Balances</h2>
         {#if loading}
-          <span class="dim-text">Updating...</span>
-        {:else}
-          <button class="btn-link" onclick={() => wallet.address && fetchAllBalances(wallet.address)}>
-            Refresh
-          </button>
+          <span class="loading-indicator"><span class="spinner spinner-sm"></span> Loading...</span>
         {/if}
       </div>
 
@@ -236,9 +232,11 @@
     margin-top: 0.5rem;
   }
 
-  .btn-link {
+  .loading-indicator {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
     font-size: 0.8rem;
-    color: var(--color-accent);
-    text-decoration: underline;
+    color: var(--color-text-dim);
   }
 </style>

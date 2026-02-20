@@ -27,6 +27,14 @@
   const decimals = $derived(getDecimals(params.source, params.token))
   const displayAmount = $derived(formatBalance(params.amount, decimals))
 
+  // Does this route cross the KAH<>PAH bridge?
+  const isBridgeTransfer = $derived.by(() => {
+    if (!route) return false
+    return route.hops.some(h =>
+      (h.from === 'kah' && h.to === 'pah') || (h.from === 'pah' && h.to === 'kah'),
+    )
+  })
+
   let fees = $state(null as HopFee[] | null)
 
   // Estimate fees on mount
@@ -68,6 +76,7 @@
 
   {#if txState.step === 'estimating'}
     <div class="card status-card">
+      <span class="spinner"></span>
       <p class="dim-text">Estimating fees...</p>
     </div>
   {/if}
@@ -88,7 +97,10 @@
 
   {#if txState.step === 'success'}
     <div class="card success-card">
-      <p>Transfer complete!</p>
+      <p class="success-text">Submitted on source chain!</p>
+      {#if isBridgeTransfer}
+        <p class="bridge-note">Funds are being bridged and will arrive at the destination in ~6 minutes.</p>
+      {/if}
       <button class="btn btn-primary" onclick={handleBack}>Back to Home</button>
     </div>
   {/if}
@@ -124,6 +136,10 @@
   .status-card {
     text-align: center;
     padding: 1.5rem;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.75rem;
   }
 
   .confirm-btn {
@@ -139,10 +155,15 @@
     padding: 1.5rem;
   }
 
-  .success-card p {
+  .success-text {
     font-size: 1.1rem;
     font-weight: 600;
     color: var(--color-success);
+  }
+
+  .bridge-note {
+    font-size: 0.9rem;
+    color: var(--color-warning);
   }
 
   .error-card {

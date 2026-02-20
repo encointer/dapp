@@ -1,6 +1,6 @@
 import { getBalance, getExistentialDeposit } from '@paraspell/sdk'
 import { CHAINS, CHAIN_IDS, getCurrency } from './chains'
-import { getApiOverrides } from './provider.svelte'
+import { getApiOverrides, getClient } from './provider.svelte'
 import type { TCurrencyCore } from '@paraspell/sdk'
 import type { ChainId, TokenSymbol, BalanceEntry, ParaSpellChain } from './types'
 import type { PolkadotClient } from 'polkadot-api'
@@ -8,7 +8,7 @@ import type { PolkadotClient } from 'polkadot-api'
 let balances = $state<BalanceEntry[]>([])
 let loading = $state(false)
 let lastError = $state<string | null>(null)
-let refreshTimer: ReturnType<typeof setInterval> | null = null
+let subscriptions: (() => void)[] = []
 
 function ed(chain: ParaSpellChain, currency: TCurrencyCore): bigint {
   const result = getExistentialDeposit(chain, currency)
@@ -43,6 +43,21 @@ async function fetchBalance(
   }
 }
 
+async function fetchChainBalances(address: string, chainId: ChainId) {
+  const overrides = getApiOverrides()
+  if (!overrides) return
+
+  const tokens = CHAINS[chainId].tokens
+  const results = await Promise.all(
+    tokens.map(t => fetchBalance(address, chainId, t.symbol, overrides)),
+  )
+
+  // Merge into existing balances
+  balances = balances
+    .filter(b => b.chain !== chainId)
+    .concat(results)
+}
+
 export async function fetchAllBalances(address: string) {
   const overrides = getApiOverrides()
   if (!overrides) {
@@ -68,19 +83,45 @@ export async function fetchAllBalances(address: string) {
   }
 }
 
-export function startAutoRefresh(address: string, intervalMs = 30_000) {
-  stopAutoRefresh()
-  fetchAllBalances(address)
-  refreshTimer = setInterval(() => {
-    if (!document.hidden) fetchAllBalances(address)
-  }, intervalMs)
+export function subscribeBalances(address: string) {
+  unsubscribeBalances()
+
+  // Initial fetch
+  loading = true
+  fetchAllBalances(address).then(() => { loading = false })
+
+  // Subscribe to finalized blocks on each chain; refetch that chain's balances
+  for (const chainId of CHAIN_IDS) {
+    const client = getClient(chainId)
+    if (!client) continue
+
+    let first = true
+    const sub = client.finalizedBlock$.subscribe({
+      next: () => {
+        // Skip the first emission (we already fetched above)
+        if (first) { first = false; return }
+        fetchChainBalances(address, chainId)
+      },
+      error: (err: unknown) => {
+        console.warn(`Block subscription error for ${chainId}:`, err)
+      },
+    })
+    subscriptions.push(() => sub.unsubscribe())
+  }
+}
+
+export function unsubscribeBalances() {
+  subscriptions.forEach(fn => fn())
+  subscriptions = []
+}
+
+// Keep old API for compatibility, but prefer subscribeBalances
+export function startAutoRefresh(address: string) {
+  subscribeBalances(address)
 }
 
 export function stopAutoRefresh() {
-  if (refreshTimer) {
-    clearInterval(refreshTimer)
-    refreshTimer = null
-  }
+  unsubscribeBalances()
 }
 
 export function getBalances(): BalanceEntry[] {

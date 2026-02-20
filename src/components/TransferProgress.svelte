@@ -7,16 +7,6 @@
   }
   let { hops }: Props = $props()
 
-  function statusIcon(status: HopProgress['status']): string {
-    switch (status) {
-      case 'pending': return '\u25CB'   // ○
-      case 'signing': return '\u270E'   // ✎
-      case 'submitted': return '\u25CF' // ●
-      case 'success': return '\u2714'   // ✔
-      case 'error': return '\u2718'     // ✘
-    }
-  }
-
   function statusLabel(status: HopProgress['status']): string {
     switch (status) {
       case 'pending': return 'Waiting'
@@ -31,7 +21,17 @@
 <div class="progress">
   {#each hops as hp, i}
     <div class="hop-row" class:error={hp.status === 'error'} class:success={hp.status === 'success'}>
-      <span class="hop-icon">{statusIcon(hp.status)}</span>
+      <span class="hop-icon">
+        {#if hp.status === 'signing' || hp.status === 'submitted'}
+          <span class="spinner spinner-sm"></span>
+        {:else if hp.status === 'success'}
+          &#x2714;
+        {:else if hp.status === 'error'}
+          &#x2718;
+        {:else}
+          &#x25CB;
+        {/if}
+      </span>
       <div class="hop-info">
         <span class="hop-label">
           Hop {i + 1}: {getChain(hp.hop.from).name} &rarr; {getChain(hp.hop.to).name}
@@ -62,6 +62,9 @@
     font-size: 1.1rem;
     min-width: 1.5rem;
     text-align: center;
+    display: flex;
+    align-items: center;
+    justify-content: center;
   }
 
   .hop-info {
