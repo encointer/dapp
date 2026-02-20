@@ -1,16 +1,14 @@
-import { defineConfig } from "vite";
-import react from "@vitejs/plugin-react";
-import { nodePolyfills } from "vite-plugin-node-polyfills";
+import { defineConfig } from 'vite'
+import { svelte } from '@sveltejs/vite-plugin-svelte'
 
-// https://vitejs.dev/config/
 export default defineConfig({
-  plugins: [react(), nodePolyfills()],
+  plugins: [svelte()],
   build: {
-    target: "esnext",
+    target: 'esnext',
   },
   optimizeDeps: {
     esbuildOptions: {
-      target: "esnext",
+      target: 'esnext',
     },
   },
-});
+})

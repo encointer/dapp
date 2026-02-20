@@ -1,35 +1,23 @@
-name: Build and Deploy
+name: Deploy
+
 on:
   push:
-    branches: [ main ]
+    branches: [main]
 
 jobs:
-  build-and-deploy:
+  deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout 🛎️
-        uses: actions/checkout@v3
-
-      - uses: pnpm/action-setup@v3
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
         with:
-          version: 8
-
-      - name: Setup node
-        uses: actions/setup-node@v3
-        with:
-          node-version: 18
-          cache: "pnpm"
-
-      - name: Install
-        run: pnpm install
-
-      - name: Build
-        run: |
-          pnpm build
-          cp ./config/CNAME ./dist/CNAME
-
-      - name: Deploy 🚀
-        uses: peaceiris/actions-gh-pages@v3
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: cp ./config/CNAME ./dist/CNAME
+      - uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_branch: gh-pages
