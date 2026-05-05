@@ -67,15 +67,22 @@ export async function convertCcToUsd(symbol: string, ccAmount: number): Promise<
 
 // USDC per 1 KSM (live quote via KAH AssetConversion pool). Cached for the
 // session; refreshed if the call is retried after a null result.
-const KSM_LOCATION = { parents: 1, interior: 'Here' }
+//
+// Locations are in PAPI-normalized {type, value} form (matches the shape
+// recipients.svelte.ts already uses successfully for ForeignAssets queries).
+const KSM_LOCATION = {
+  parents: 1,
+  interior: { type: 'Here', value: undefined },
+}
 const USDC_KAH_LOCATION = {
   parents: 2,
   interior: {
-    X4: [
-      { GlobalConsensus: { Polkadot: null } },
-      { Parachain: 1000 },
-      { PalletInstance: 50 },
-      { GeneralIndex: 1337 },
+    type: 'X4',
+    value: [
+      { type: 'GlobalConsensus', value: { type: 'Polkadot', value: undefined } },
+      { type: 'Parachain', value: 1000 },
+      { type: 'PalletInstance', value: 50 },
+      { type: 'GeneralIndex', value: 1337n },
     ],
   },
 }
