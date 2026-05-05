@@ -33,7 +33,6 @@ function setSyncStatus(chain: ChainId, status: SyncStatus) {
 }
 
 async function createSmoldotClients(): Promise<Clients> {
-  // @ts-expect-error Vite worker import
   const SmWorker = (await import('./smoldot-worker?worker')).default
   smoldotRef = startFromWorker(new SmWorker())
 
