@@ -174,11 +174,61 @@
 
   const totalAmount = $derived(parseAmount(amountStr, decimals))
 
+  // Soft-warn when the donation looks excessive vs. recent community activity.
+  // - USDC: compare to sum of selected treasuries' last-3-months turnover (in USDC).
+  //         If none of them have turnover data loaded yet, skip the check.
+  // - KSM:  compare to 6 months (≈ 18 ceremony cycles, 10 d each) of expected drips
+  //         at current participation across selected faucets.
+  const CYCLES_PER_6M = 18n
+  const donationWarning = $derived.by<string | null>(() => {
+    if (!totalAmount || selectionCount() === 0) return null
+    if (token === 'USDC') {
+      let threshold = 0
+      let anyKnown = false
+      for (const t of treasuries) {
+        if (!isSelected(t.kahAccount)) continue
+        if (t.turnoverLast3MonthsUsdc != null) {
+          threshold += t.turnoverLast3MonthsUsdc
+          anyKnown = true
+        }
+      }
+      if (!anyKnown) return null
+      const totalUsdc = Number(totalAmount) / 1e6
+      if (totalUsdc <= threshold) return null
+      return `Your donation (~${totalUsdc.toLocaleString(undefined, { maximumFractionDigits: 0 })} USDC) exceeds the selected communities' total turnover over the last 3 months (~${threshold.toLocaleString(undefined, { maximumFractionDigits: 0 })} USDC). It may currently be too high in relation to community activity.`
+    } else {
+      // KSM: per faucet, expected drips per cycle = attestedPersons × dripAmount.
+      let threshold = 0n
+      for (const f of faucets) {
+        if (!isSelected(f.account)) continue
+        threshold += BigInt(f.attestedPersons) * f.dripAmount * CYCLES_PER_6M
+      }
+      if (totalAmount <= threshold && threshold > 0n) return null
+      const fmt = (v: bigint) => (Number(v) / 1e12).toLocaleString(undefined, { maximumFractionDigits: 4 })
+      if (threshold === 0n) {
+        return `The selected faucets currently have no recently active drippers. This donation may sit unspent in the pot for some time.`
+      }
+      return `Your donation (~${fmt(totalAmount)} KSM) exceeds 6 months of drips at current participation (~${fmt(threshold)} KSM). It may currently be too high in relation to community activity.`
+    }
+  })
+
   const perRecipient = $derived.by(() => {
     if (!totalAmount || selectionCount() === 0) return null
     const splits = splitAmount(totalAmount, selectionCount())
     return splits[splits.length - 1] // base share (last == base, first has remainder)
   })
+
+  // Available balance on the chosen source for the chosen token (already net of ED).
+  // Returns null while balances haven't been fetched yet for that chain.
+  const availableBalance = $derived.by<bigint | null>(() => {
+    if (!validSource) return null
+    const b = getBalanceFor(validSource, token)
+    return b ? b.transferable : null
+  })
+
+  const insufficientBalance = $derived(
+    totalAmount !== null && availableBalance !== null && totalAmount > availableBalance,
+  )
 
   const canContinue = $derived(
     !!wallet.connected &&
@@ -186,6 +236,7 @@
     !!validSource &&
     selectionCount() > 0 &&
     !!totalAmount &&
+    !insufficientBalance &&
     txState.step === 'idle'
   )
 
@@ -330,6 +381,15 @@
             ≈ {formatBalance(perRecipient, decimals)} {token} per recipient
           </span>
         </div>
+      {/if}
+
+      {#if insufficientBalance && availableBalance !== null}
+        <div class="error-banner" role="alert">
+          Insufficient balance — available {formatBalance(availableBalance, decimals)} {token} on {validSource ? CHAINS[validSource].name : ''} (excluding existential deposit).
+        </div>
+      {/if}
+      {#if donationWarning}
+        <div class="warning-banner" role="alert">⚠ {donationWarning}</div>
       {/if}
 
       <button class="btn btn-primary submit-btn" disabled={!canContinue} onclick={handleContinue}>
@@ -541,6 +601,28 @@
   }
 
   .submit-btn { width: 100%; margin-top: 0.5rem; }
+
+  .warning-banner {
+    margin-top: 0.5rem;
+    padding: 0.5rem 0.65rem;
+    border: 1px solid var(--color-warning, #c98a00);
+    border-radius: var(--radius);
+    background: rgba(220, 160, 0, 0.10);
+    color: var(--color-warning, #c98a00);
+    font-size: 0.8rem;
+    line-height: 1.4;
+  }
+
+  .error-banner {
+    margin-top: 0.5rem;
+    padding: 0.5rem 0.65rem;
+    border: 1px solid var(--color-danger, #b13030);
+    border-radius: var(--radius);
+    background: rgba(220, 50, 50, 0.10);
+    color: var(--color-danger, #b13030);
+    font-size: 0.8rem;
+    line-height: 1.4;
+  }
 
   .summary {
     display: flex;
