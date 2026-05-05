@@ -226,6 +226,21 @@
     return b ? b.transferable : null
   })
 
+  // True only after balances for the allowed sources have streamed in AND every
+  // one of them is zero. We never flip this true while balances are still loading.
+  const allBalancesZero = $derived.by<boolean>(() => {
+    let anyData = false
+    let anyNonZero = false
+    for (const c of allowedSources) {
+      const b = getBalanceFor(c, token)
+      if (b) {
+        anyData = true
+        if (b.transferable > 0n) { anyNonZero = true; break }
+      }
+    }
+    return anyData && !anyNonZero
+  })
+
   const insufficientBalance = $derived(
     totalAmount !== null && availableBalance !== null && totalAmount > availableBalance,
   )
@@ -295,11 +310,7 @@
     </ul>
   </section>
 
-  {#if !wallet.connected}
-    <div class="card connect-prompt">
-      <p>Connect your wallet to donate to encointer faucets and community treasuries.</p>
-    </div>
-  {:else if recipientsLoading && !isRecipientsLoaded()}
+  {#if recipientsLoading && !isRecipientsLoaded()}
     <div class="card status-card">
       <span class="spinner"></span>
       <p class="dim-text">Loading faucets and treasuries...</p>
@@ -311,7 +322,7 @@
     </div>
   {:else if txState.step === 'idle' || txState.step === 'estimating'}
     <section class="card">
-      <h2>Donate</h2>
+      <h2>Donation Rails</h2>
 
       <div class="form-row">
         <span class="form-label">Asset</span>
@@ -322,7 +333,7 @@
       </div>
 
       <div class="form-row source-row">
-        <span class="form-label">From</span>
+        <span class="form-label">from chain</span>
         <div class="source-cards">
           {#each allowedSources as c}
             {@const bal = getBalanceFor(c, token)}
@@ -334,8 +345,13 @@
               type="button"
             >
               <span class="chain-name">{CHAINS[c].name}</span>
-              <span class="chain-balance">
-                {bal ? formatBalance(bal.transferable, cDecimals) : '—'} {token}
+              <span class="chain-balance" class:placeholder={!wallet.connected || !bal}>
+                <span class="dim-text">your balance:</span>
+                {#if !wallet.connected}
+                  0 {token}
+                {:else}
+                  {bal ? formatBalance(bal.transferable, cDecimals) : '—'} {token}
+                {/if}
               </span>
               {#if c !== dest}
                 <span class="badge">cross-chain</span>
@@ -344,6 +360,26 @@
           {/each}
         </div>
       </div>
+
+      {#if allBalancesZero}
+        <div class="empty-balance-hint">
+          You don't hold {token} on any supported chain.
+          {#if token === 'KSM'}
+            Acquire KSM on a major exchange — e.g.
+            <a href="https://www.binance.com/en/trade/KSM_USDT" target="_blank" rel="noopener">Binance</a>,
+            <a href="https://www.kraken.com/prices/kusama" target="_blank" rel="noopener">Kraken</a>, or
+            <a href="https://www.mexc.com/exchange/KSM_USDT" target="_blank" rel="noopener">MEXC</a> —
+            and withdraw to your address on <strong>Asset Hub Kusama</strong>.
+          {:else}
+            Withdraw USDC to your address on <strong>Asset Hub Polkadot</strong> from
+            <a href="https://www.gate.io/" target="_blank" rel="noopener">Gate.io</a>,
+            <a href="https://www.binance.com/" target="_blank" rel="noopener">Binance</a>,
+            <a href="https://www.kucoin.com/" target="_blank" rel="noopener">KuCoin</a>, or
+            <a href="https://www.mexc.com/" target="_blank" rel="noopener">MEXC</a>
+            — these support USDC withdrawals on Polkadot Asset Hub.
+          {/if}
+        </div>
+      {/if}
     </section>
 
     <section class="card">
@@ -383,6 +419,9 @@
         </div>
       {/if}
 
+      {#if !wallet.connected}
+        <div class="info-banner">Connect your wallet to donate.</div>
+      {/if}
       {#if insufficientBalance && availableBalance !== null}
         <div class="error-banner" role="alert">
           Insufficient balance — available {formatBalance(availableBalance, decimals)} {token} on {validSource ? CHAINS[validSource].name : ''} (excluding existential deposit).
@@ -464,12 +503,6 @@
 
   h2 { font-size: 1.1rem; font-weight: 600; }
   h3 { font-size: 0.95rem; font-weight: 600; margin-bottom: 0.5rem; }
-
-  .connect-prompt {
-    text-align: center;
-    padding: 2rem;
-    color: var(--color-text-dim);
-  }
 
   .intro {
     font-size: 0.88rem;
@@ -587,11 +620,35 @@
     font-size: 0.8rem;
     color: var(--color-text-dim);
   }
+  .source-card .chain-balance.placeholder {
+    opacity: 0.55;
+  }
 
   .source-card .badge {
     align-self: flex-start;
     margin-left: 0;
     margin-top: 0.15rem;
+  }
+
+  .empty-balance-hint {
+    margin-top: 0.5rem;
+    padding: 0.6rem 0.7rem;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    background: var(--color-surface-hover);
+    font-size: 0.8rem;
+    line-height: 1.45;
+    color: var(--color-text-dim);
+  }
+  .empty-balance-hint a {
+    color: var(--color-accent);
+    text-decoration: none;
+  }
+  .empty-balance-hint a:hover {
+    text-decoration: underline;
+  }
+  .empty-balance-hint strong {
+    color: var(--color-text);
   }
 
   .recipient-list {
@@ -622,6 +679,18 @@
     color: var(--color-danger, #b13030);
     font-size: 0.8rem;
     line-height: 1.4;
+  }
+
+  .info-banner {
+    margin-top: 0.5rem;
+    padding: 0.5rem 0.65rem;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    background: var(--color-surface-hover);
+    color: var(--color-text-dim);
+    font-size: 0.8rem;
+    line-height: 1.4;
+    text-align: center;
   }
 
   .summary {
