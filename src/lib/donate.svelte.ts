@@ -32,6 +32,12 @@ export function subscanUrl(chain: ChainId, txHash: string): string | null {
   return `${host}/extrinsic/${txHash}`
 }
 
+export function subscanAccountUrl(chain: ChainId, address: string): string | null {
+  const host = SUBSCAN_HOSTS[chain]
+  if (!host) return null
+  return `${host}/account/${address}`
+}
+
 export interface DonateRecipient {
   /** Stable identifier (account address) — used for selection */
   id: string

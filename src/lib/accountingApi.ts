@@ -39,6 +39,37 @@ export function lastFullMonths(n: number, now: Date = new Date()): Array<{ year:
   return out
 }
 
+interface ReputablesByCindexResponse {
+  data: Record<string, number>
+  communityName: string
+}
+
+/**
+ * Returns the most recent (highest cindex) reputables count for a community.
+ * Backed by /v1/accounting/reputables-by-cindex which computes the union of
+ * accounts that earned reputation within the current reputation lifetime.
+ * Returns null on fetch failure or if the community has no reputables.
+ */
+export async function getCurrentReputables(cid: string): Promise<number | null> {
+  try {
+    const url = `${API_URL}/accounting/reputables-by-cindex?cid=${encodeURIComponent(cid)}`
+    const res = await fetch(url, { credentials: 'omit' })
+    if (!res.ok) {
+      console.warn(`[accounting] reputables-by-cindex ${cid} → ${res.status}`)
+      return null
+    }
+    const body = await res.json() as ReputablesByCindexResponse
+    const cindices = Object.keys(body.data ?? {}).map(Number).filter(Number.isFinite)
+    if (cindices.length === 0) return 0
+    const latest = Math.max(...cindices)
+    const v = body.data[String(latest)]
+    return typeof v === 'number' ? v : null
+  } catch (err) {
+    console.warn(`[accounting] reputables-by-cindex ${cid} fetch failed`, err)
+    return null
+  }
+}
+
 /**
  * Sum the community-currency volume across the last `n` full calendar months.
  * Returns null on any fetch failure (treated as "no data").

@@ -1,5 +1,7 @@
 /// <reference types="vite/client" />
 
+import { getClient } from './provider.svelte'
+
 // Hard-coded CC→local-fiat rates for known communities.
 // Mirrors encointer-wallet-flutter app/lib/service/forex/known_community.dart
 // (markup not applied — we want approximate turnover, not buy/sell quotes).
@@ -61,4 +63,61 @@ export async function convertCcToUsd(symbol: string, ccAmount: number): Promise<
   const ccPerUsd = k.localFiatRate * usdToFiat
   if (ccPerUsd <= 0) return null
   return ccAmount / ccPerUsd
+}
+
+// USDC per 1 KSM (live quote via KAH AssetConversion pool). Cached for the
+// session; refreshed if the call is retried after a null result.
+const KSM_LOCATION = { parents: 1, interior: 'Here' }
+const USDC_KAH_LOCATION = {
+  parents: 2,
+  interior: {
+    X4: [
+      { GlobalConsensus: { Polkadot: null } },
+      { Parachain: 1000 },
+      { PalletInstance: 50 },
+      { GeneralIndex: 1337 },
+    ],
+  },
+}
+let ksmUsdcRatePromise: Promise<number | null> | null = null
+
+async function fetchKsmUsdcRate(): Promise<number | null> {
+  const kahClient = getClient('kah')
+  if (!kahClient) return null
+  try {
+    const api = kahClient.getUnsafeApi() as unknown as {
+      apis: { AssetConversionApi: { quote_price_exact_tokens_for_tokens: (a: unknown, b: unknown, amt: bigint, includeFee: boolean) => Promise<bigint | null | undefined> } }
+    }
+    const oneKsm = 10n ** 12n
+    const result = await api.apis.AssetConversionApi.quote_price_exact_tokens_for_tokens(
+      KSM_LOCATION, USDC_KAH_LOCATION, oneKsm, true,
+    )
+    if (result == null) return null
+    // USDC has 6 decimals.
+    return Number(BigInt(result)) / 1e6
+  } catch (err) {
+    console.warn('[forex] KSM/USDC quote failed', err)
+    return null
+  }
+}
+
+export function getKsmUsdcRate(): Promise<number | null> {
+  if (!ksmUsdcRatePromise) {
+    ksmUsdcRatePromise = fetchKsmUsdcRate().then(r => {
+      // If the fetch fails, allow a future retry.
+      if (r == null) ksmUsdcRatePromise = null
+      return r
+    })
+  }
+  return ksmUsdcRatePromise
+}
+
+/**
+ * Approximate USDC value of a KSM amount (12 decimals). Returns null if the
+ * AssetConversion pool isn't reachable.
+ */
+export async function ksmToUsdc(ksmAmount: bigint): Promise<number | null> {
+  const rate = await getKsmUsdcRate()
+  if (rate == null) return null
+  return (Number(ksmAmount) / 1e12) * rate
 }

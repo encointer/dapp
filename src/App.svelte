@@ -77,6 +77,13 @@
   {/if}
 </main>
 
+<footer>
+  Built with
+  <a href="https://papi.how/" target="_blank" rel="noopener">PAPI</a>
+  and
+  <a href="https://paraspell.xyz/" target="_blank" rel="noopener">ParaSpell</a>.
+</footer>
+
 <style>
   main {
     flex: 1;
@@ -84,5 +91,24 @@
     max-width: 520px;
     margin: 0 auto;
     padding: 1rem;
+  }
+
+  footer {
+    width: 100%;
+    max-width: 520px;
+    margin: 0 auto;
+    padding: 0.75rem 1rem 1.25rem;
+    text-align: center;
+    font-size: 0.75rem;
+    color: var(--color-text-dim);
+  }
+  footer a {
+    color: var(--color-text-dim);
+    text-decoration: none;
+    border-bottom: 1px dotted var(--color-text-dim);
+  }
+  footer a:hover {
+    color: var(--color-accent);
+    border-bottom-color: var(--color-accent);
   }
 </style>

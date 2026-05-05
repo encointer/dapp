@@ -493,8 +493,6 @@
     display: flex;
     flex-direction: column;
     gap: 0.4rem;
-    max-height: 60vh;
-    overflow-y: auto;
   }
 
   .submit-btn { width: 100%; margin-top: 0.5rem; }

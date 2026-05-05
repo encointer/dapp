@@ -1,7 +1,7 @@
 import { AccountId, Binary } from 'polkadot-api'
 import { getClient } from './provider.svelte'
-import { getTurnoverLastNMonths } from './accountingApi'
-import { convertCcToUsd } from './forex'
+import { getTurnoverLastNMonths, getCurrentReputables } from './accountingApi'
+import { convertCcToUsd, ksmToUsdc } from './forex'
 
 const ENCOINTER_PARA_ID = 1001
 const KSM_SS58_PREFIX = 2
@@ -28,6 +28,8 @@ export interface Faucet {
   /** Approximated count of unique persons attested every 10 days who could drip
    *  from this faucet (sum across whitelisted cids; sum across all cids when open). */
   attestedPersons: number
+  /** USDC value of one drip — `null` if quote unavailable, undefined while loading. */
+  dripUsdc: number | null | undefined
 }
 
 export interface Treasury {
@@ -41,8 +43,10 @@ export interface Treasury {
   usdcBalance: bigint
   location?: string
   donationsDisabled: boolean
-  /** Approximated count of unique persons attested every 10 days in this community. */
-  attestedPersons: number
+  /** Count of regularly active unique persons (current reputables, fetched from
+   *  accounting-backend). `null` once loading completes if unavailable. */
+  regularlyActivePersons: number | null
+  regularlyActivePersonsLoading: boolean
   /** Total community-currency turnover over the last 3 full calendar months,
    *  fetched from accounting-backend. `null` once loading completes if unavailable. */
   turnoverLast3Months: number | null
@@ -149,6 +153,14 @@ interface UnsafeApi {
   apis: Record<string, Record<string, (...args: unknown[]) => Promise<unknown>>>
 }
 
+/**
+ * Returns expected new reputations issued per ceremony cycle (≈ 10 days) per cid.
+ * This is the attendance of the most recent fully-attested ceremony per cid:
+ * each new reputation = one fresh, unspent drip permission. We walk cindices
+ * from newest to oldest within the reputation-lifetime window and pick the
+ * first non-zero count (skips the in-progress cindex if rewards haven't been
+ * issued yet).
+ */
 async function loadReputablesByCid(
   encApi: UnsafeApi,
   cidsRaw: Array<{ geohash: unknown; digest: unknown }>,
@@ -166,17 +178,19 @@ async function loadReputablesByCid(
     for (let c = minC; c <= current; c++) {
       queries.push(encApi.query.EncointerCeremonies.ReputationCount.getValue([cidObj, c]))
     }
-    let max = 0
+    let latestNonZero = 0
     try {
       const counts = await Promise.all(queries)
-      for (const v of counts) {
+      // queries[i] corresponds to cindex (minC + i); iterate newest → oldest
+      for (let i = counts.length - 1; i >= 0; i--) {
+        const v = counts[i]
         const n = typeof v === 'bigint' ? Number(v) : Number(v ?? 0)
-        if (n > max) max = n
+        if (n > 0) { latestNonZero = n; break }
       }
     } catch (err) {
       console.warn(`[recipients] reputation count query failed for ${cidStr}`, err)
     }
-    out.set(cidStr, max)
+    out.set(cidStr, latestNonZero)
   }
   return out
 }
@@ -206,7 +220,10 @@ async function loadFaucets(encApi: UnsafeApi, reputablesByCid: Map<string, numbe
     const attestedPersons = whitelist == null
       ? totalAcrossAllCids
       : whitelist.reduce((s, c) => s + (reputablesByCid.get(c) ?? 0), 0)
-    result.push({ account, name, dripAmount: f.drip_amount, whitelist, freeBalance, attestedPersons })
+    result.push({
+      account, name, dripAmount: f.drip_amount, whitelist, freeBalance, attestedPersons,
+      dripUsdc: undefined,
+    })
   }
   return result
 }
@@ -261,7 +278,6 @@ async function loadTreasuries(
   encApi: UnsafeApi,
   kahApi: UnsafeApi,
   cidsRaw: Array<{ geohash: unknown; digest: unknown }>,
-  reputablesByCid: Map<string, number>,
 ): Promise<Treasury[]> {
   const metaEntries = await encApi.query.EncointerCommunities.CommunityMetadata.getEntries()
   const nameByCid = new Map<string, string>()
@@ -326,13 +342,29 @@ async function loadTreasuries(
       usdcBalance,
       location: info.location,
       donationsDisabled: info.donationsDisabled ?? false,
-      attestedPersons: reputablesByCid.get(cidStr) ?? 0,
+      regularlyActivePersons: null,
+      regularlyActivePersonsLoading: true,
       turnoverLast3Months: null,
       turnoverLoading: true,
       turnoverLast3MonthsUsdc: null,
     })
   }
   return result
+}
+
+async function fetchFaucetDripUsdcInto(account: string, dripAmount: bigint) {
+  const usdc = await ksmToUsdc(dripAmount)
+  const f = faucets.find(x => x.account === account)
+  if (f) f.dripUsdc = usdc
+}
+
+async function fetchRegularlyActiveInto(cid: string) {
+  const n = await getCurrentReputables(cid)
+  const t = treasuries.find(x => x.cid === cid)
+  if (t) {
+    t.regularlyActivePersons = n
+    t.regularlyActivePersonsLoading = false
+  }
 }
 
 async function fetchTurnoverInto(cid: string) {
@@ -379,7 +411,7 @@ export async function loadRecipients() {
       throw new Error(`loadFaucets: ${errMsg(err)}`)
     }
     try {
-      t = await loadTreasuries(encApi, kahApi, cidsRaw, reputablesByCid)
+      t = await loadTreasuries(encApi, kahApi, cidsRaw)
     } catch (err) {
       console.error('[recipients] loadTreasuries threw:', errMsg(err), err)
       throw new Error(`loadTreasuries: ${errMsg(err)}`)
@@ -387,9 +419,13 @@ export async function loadRecipients() {
     faucets = f
     treasuries = t
     loadedOnce = true
-    // Fire turnover fetches in parallel; mutate per-treasury entries as they land.
+    // Fire turnover + reputables + KSM/USDC quote fetches in parallel; mutate entries as they land.
     for (const tr of treasuries) {
       void fetchTurnoverInto(tr.cid)
+      void fetchRegularlyActiveInto(tr.cid)
+    }
+    for (const fc of faucets) {
+      void fetchFaucetDripUsdcInto(fc.account, fc.dripAmount)
     }
   } catch (err) {
     lastError = errMsg(err)
