@@ -2,13 +2,22 @@
   import Header from './components/Header.svelte'
   import HomeView from './views/HomeView.svelte'
   import TransferView from './views/TransferView.svelte'
+  import DonateView from './views/DonateView.svelte'
   import type { TransferParams } from './lib/types'
   import { connect } from './lib/provider.svelte'
   import { autoReconnect, getWalletState } from './lib/wallet.svelte'
   import { startAutoRefresh, stopAutoRefresh } from './lib/balances.svelte'
   import { getProviderMode } from './lib/settings.svelte'
 
-  let view = $state<'home' | 'transfer'>('home')
+  type View = 'home' | 'transfer' | 'donate'
+
+  function viewFromHash(hash: string): View {
+    if (hash === '#donate') return 'donate'
+    if (hash === '#transfer') return 'transfer'
+    return 'home'
+  }
+
+  let view = $state<View>(viewFromHash(window.location.hash))
   let transferParams = $state<TransferParams | null>(null)
 
   // Initialize provider + wallet on mount
@@ -40,22 +49,17 @@
   }
 
   function handleHashChange() {
-    if (window.location.hash !== '#transfer') {
-      view = 'home'
-      transferParams = null
-    }
+    const next = viewFromHash(window.location.hash)
+    view = next
+    if (next !== 'transfer') transferParams = null
   }
 
   $effect(() => {
-    // Initialize from hash
-    if (window.location.hash === '#transfer') {
-      // If no params, go home
-      if (!transferParams) {
-        view = 'home'
-        window.location.hash = ''
-      }
+    // If landed on #transfer with no params (e.g. page reload), redirect home
+    if (view === 'transfer' && !transferParams) {
+      view = 'home'
+      window.location.hash = ''
     }
-
     window.addEventListener('hashchange', handleHashChange)
     return () => window.removeEventListener('hashchange', handleHashChange)
   })
@@ -66,6 +70,8 @@
 <main>
   {#if view === 'transfer' && transferParams}
     <TransferView params={transferParams} onBack={onNavigateHome} />
+  {:else if view === 'donate'}
+    <DonateView />
   {:else}
     <HomeView onTransfer={onNavigateTransfer} />
   {/if}

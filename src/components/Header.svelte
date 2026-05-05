@@ -7,6 +7,13 @@
 
   let showWallet = $state(false)
   let showSettings = $state(false)
+  let currentHash = $state(window.location.hash)
+
+  $effect(() => {
+    const onHashChange = () => { currentHash = window.location.hash }
+    window.addEventListener('hashchange', onHashChange)
+    return () => window.removeEventListener('hashchange', onHashChange)
+  })
 
   const wallet = $derived(getWalletState())
 </script>
@@ -14,7 +21,11 @@
 <header>
   <div class="header-left">
     <img src="/logo.png" alt="Encointer" class="logo" />
-    <span class="title">Transfer</span>
+    <nav class="tabs">
+      <!-- svelte-ignore a11y_invalid_attribute -->
+      <a href="#" class="tab" class:active={currentHash !== '#donate'}>Transfer</a>
+      <a href="#donate" class="tab" class:active={currentHash === '#donate'}>Donate</a>
+    </nav>
     <StatusBadge />
   </div>
 
@@ -73,9 +84,23 @@
     width: auto;
   }
 
-  .title {
+  .tabs {
+    display: flex;
+    gap: 0.25rem;
+  }
+
+  .tab {
+    padding: 0.3rem 0.6rem;
     font-weight: 600;
-    font-size: 1.1rem;
+    font-size: 0.95rem;
+    color: var(--color-text-dim);
+    text-decoration: none;
+    border-bottom: 2px solid transparent;
+  }
+
+  .tab.active {
+    color: var(--color-text);
+    border-bottom-color: var(--color-accent);
   }
 
   .settings-btn {
