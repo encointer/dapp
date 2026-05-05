@@ -2,6 +2,7 @@
   import type { Faucet, Treasury } from '../lib/recipients.svelte'
   import { formatBalance, truncateAddress } from '../lib/format'
   import { subscanAccountUrl } from '../lib/donate.svelte'
+  import AddressProofModal from './AddressProofModal.svelte'
 
   type FaucetProps = { kind: 'faucet'; data: Faucet; selected: boolean; disabled?: boolean; onToggle: () => void }
   type TreasuryProps = { kind: 'treasury'; data: Treasury; selected: boolean; disabled?: boolean; onToggle: () => void }
@@ -15,6 +16,15 @@
 
   let copied = $state(false)
   let copyTimeout: ReturnType<typeof setTimeout> | null = null
+  let showProof = $state(false)
+
+  function openProof(e: MouseEvent) {
+    e.stopPropagation()
+    showProof = true
+  }
+  function closeProof() {
+    showProof = false
+  }
 
   function toggle() {
     if (!isDisabled) props.onToggle()
@@ -92,6 +102,13 @@
           aria-label="Copy full address"
           onclick={copyAddr}
         >{copied ? '✓' : '⧉'}</button>
+        <button
+          type="button"
+          class="copy-btn"
+          title="Show key-less account proof"
+          aria-label="Show key-less account proof"
+          onclick={openProof}
+        >🛡</button>
       </div>
     </div>
   {:else}
@@ -143,6 +160,13 @@
           aria-label="Copy full address"
           onclick={copyAddr}
         >{copied ? '✓' : '⧉'}</button>
+        <button
+          type="button"
+          class="copy-btn"
+          title="Show key-less account proof"
+          aria-label="Show key-less account proof"
+          onclick={openProof}
+        >🛡</button>
         {#if subscanLink}
           <a
             href={subscanLink}
@@ -156,6 +180,24 @@
     </div>
   {/if}
 </div>
+
+{#if showProof}
+  {#if props.kind === 'faucet'}
+    <AddressProofModal
+      kind="faucet"
+      name={props.data.name}
+      expectedAddress={props.data.account}
+      onClose={closeProof}
+    />
+  {:else}
+    <AddressProofModal
+      kind="kah-treasury"
+      cid={props.data.cid}
+      expectedAddress={props.data.kahAccount}
+      onClose={closeProof}
+    />
+  {/if}
+{/if}
 
 <style>
   .recipient-card {
