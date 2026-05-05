@@ -8,6 +8,8 @@
   let showWallet = $state(false)
   let showSettings = $state(false)
   let currentHash = $state(window.location.hash)
+  // Route portion only (strip ?query)
+  const currentRoute = $derived(currentHash.split('?')[0])
 
   $effect(() => {
     const onHashChange = () => { currentHash = window.location.hash }
@@ -23,8 +25,8 @@
     <img src="/logo.png" alt="Encointer" class="logo" />
     <nav class="tabs">
       <!-- svelte-ignore a11y_invalid_attribute -->
-      <a href="#" class="tab" class:active={currentHash !== '#donate'}>Transfer</a>
-      <a href="#donate" class="tab" class:active={currentHash === '#donate'}>Donate</a>
+      <a href="#" class="tab" class:active={!currentRoute.startsWith('#donate')}>Transfer</a>
+      <a href="#donate" class="tab" class:active={currentRoute.startsWith('#donate')}>Donate</a>
     </nav>
     <StatusBadge />
   </div>

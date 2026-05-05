@@ -32,10 +32,21 @@
   } from '../lib/donate.svelte'
   import RecipientCard from '../components/RecipientCard.svelte'
   import AmountInput from '../components/AmountInput.svelte'
+  import { parseDonateUrlParams } from '../lib/donateUrl'
 
-  let token = $state<TokenSymbol>('KSM')
-  let source = $state<ChainId | null>(null)
-  let amountStr = $state('')
+  // URL param prefill (asset/source/amount/recipients). Recipient ids resolve
+  // once the recipients data is loaded. Each value is consumed once: setting
+  // it to undefined prevents re-applying after the user adjusts.
+  const initialUrl = parseDonateUrlParams()
+
+  let token = $state<TokenSymbol>(initialUrl.token ?? 'KSM')
+  let source = $state<ChainId | null>(
+    initialUrl.source && (initialUrl.token ? ALLOWED_SOURCES[initialUrl.token].includes(initialUrl.source) : true)
+      ? initialUrl.source
+      : null,
+  )
+  let amountStr = $state(initialUrl.amount ?? '')
+  let urlRecipientsPending = $state<string[] | null>(initialUrl.recipients ?? null)
 
   const wallet = $derived(getWalletState())
   const txState = $derived(getDonateState())
@@ -55,9 +66,13 @@
   // Once defaulted for a token, we don't override user adjustments.
   let defaultedFor = $state<TokenSymbol | null>(null)
 
-  // Reset selection on token change
+  // Reset selection on token CHANGE. The first run is a mount, not a change —
+  // skipping it preserves URL-prefilled `source` (which would otherwise be
+  // wiped by `source = null` below before the user even sees the page).
+  let tokenChangeFirstRun = true
   $effect(() => {
     void token
+    if (tokenChangeFirstRun) { tokenChangeFirstRun = false; return }
     clearSelection()
     source = null
     defaultedFor = null
@@ -117,6 +132,36 @@
   const selectedRecipients = $derived(
     recipients.filter(r => isSelected(r.id) && !disabledIds.has(r.id)),
   )
+
+  // Apply URL-driven recipient pre-selection once recipients are loaded.
+  // Matches URL identifiers against:
+  //   - USDC token: cid (treasury) → recipient id is the kahAccount
+  //   - KSM token: faucet account SS58 OR faucet name (case-insensitive)
+  // Consumes the pending list (set to null) so subsequent token changes go
+  // through the normal default-all flow.
+  $effect(() => {
+    if (urlRecipientsPending == null) return
+    if (recipients.length === 0) return
+    const wanted = new Set(urlRecipientsPending.map(s => s.toLowerCase()))
+    const matchedIds: string[] = []
+    if (token === 'USDC') {
+      for (const t of treasuries) {
+        if (!t.kahAccount || disabledIds.has(t.kahAccount)) continue
+        if (wanted.has(t.cid.toLowerCase())) matchedIds.push(t.kahAccount)
+      }
+    } else {
+      for (const f of faucets) {
+        if (wanted.has(f.account.toLowerCase()) || wanted.has((f.name ?? '').toLowerCase())) {
+          matchedIds.push(f.account)
+        }
+      }
+    }
+    if (matchedIds.length > 0) {
+      selectAll(matchedIds)
+      defaultedFor = token
+    }
+    urlRecipientsPending = null
+  })
 
   // Default-select all enabled recipients once they appear for the current token.
   // Stays sticky after the user adjusts (we only re-default on token change).

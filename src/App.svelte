@@ -12,8 +12,10 @@
   type View = 'home' | 'transfer' | 'donate'
 
   function viewFromHash(hash: string): View {
-    if (hash === '#donate') return 'donate'
-    if (hash === '#transfer') return 'transfer'
+    // Strip query portion so `#donate?asset=...` still matches `#donate`.
+    const route = hash.split('?')[0]
+    if (route === '#donate') return 'donate'
+    if (route === '#transfer') return 'transfer'
     return 'home'
   }
 
