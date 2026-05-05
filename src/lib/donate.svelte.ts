@@ -8,13 +8,29 @@ import type { Faucet, Treasury } from './recipients.svelte'
 
 const ksmSs58 = AccountId(2)
 
+export interface SubmittedTx {
+  txHash: string
+  chain: ChainId
+}
+
 export type DonateState =
   | { step: 'idle' }
   | { step: 'estimating' }
   | { step: 'ready'; fee: bigint; feeSymbol: string; feeDecimals: number; mode: 'batch' | 'sequential' }
   | { step: 'executing'; mode: 'batch' | 'sequential'; current: number; total: number }
-  | { step: 'success' }
+  | { step: 'success'; submitted: SubmittedTx[] }
   | { step: 'error'; message: string }
+
+const SUBSCAN_HOSTS: Partial<Record<ChainId, string>> = {
+  kah: 'https://assethub-kusama.subscan.io',
+  pah: 'https://assethub-polkadot.subscan.io',
+}
+
+export function subscanUrl(chain: ChainId, txHash: string): string | null {
+  const host = SUBSCAN_HOSTS[chain]
+  if (!host) return null
+  return `${host}/extrinsic/${txHash}`
+}
 
 export interface DonateRecipient {
   /** Stable identifier (account address) — used for selection */
@@ -75,7 +91,7 @@ interface SrcApi {
 interface UnsignedTx {
   decodedCall: unknown
   getEstimatedFees: (sender: string) => Promise<bigint>
-  signAndSubmit: (signer: PolkadotSigner) => Promise<unknown>
+  signAndSubmit: (signer: PolkadotSigner) => Promise<{ txHash: string } | unknown>
 }
 
 const USDC_LOCATION = {
@@ -375,6 +391,15 @@ function isUserCancel(err: unknown): boolean {
   return msg.includes('cancel') || msg.includes('reject') || msg.includes('user denied')
 }
 
+function extractTxHash(res: unknown): string | null {
+  if (typeof res === 'string' && res.startsWith('0x')) return res
+  if (typeof res === 'object' && res !== null) {
+    const r = res as { txHash?: unknown }
+    if (typeof r.txHash === 'string') return r.txHash
+  }
+  return null
+}
+
 export async function executeDonate(
   params: DonateParams,
   signer: PolkadotSigner,
@@ -387,13 +412,17 @@ export async function executeDonate(
       return false
     }
 
+    const submitted: SubmittedTx[] = []
+
     if (calls.length > 1) {
       const batch = await buildBatch(params.source, calls)
       if (batch) {
         state = { step: 'executing', mode: 'batch', current: 0, total: 1 }
         try {
-          await batch.signAndSubmit(signer)
-          state = { step: 'success' }
+          const res = await batch.signAndSubmit(signer)
+          const txHash = extractTxHash(res)
+          if (txHash) submitted.push({ txHash, chain: params.source })
+          state = { step: 'success', submitted }
           return true
         } catch (err) {
           if (isUserCancel(err)) {
@@ -403,19 +432,39 @@ export async function executeDonate(
           console.warn('[donate] batch submit failed; falling back to sequential', err)
         }
       }
+    } else {
+      // Single call (e.g. consolidated XCM, or single recipient).
+      state = { step: 'executing', mode: 'batch', current: 0, total: 1 }
+      try {
+        const res = await calls[0].signAndSubmit(signer)
+        const txHash = extractTxHash(res)
+        if (txHash) submitted.push({ txHash, chain: params.source })
+        state = { step: 'success', submitted }
+        return true
+      } catch (err) {
+        if (isUserCancel(err)) {
+          state = { step: 'error', message: 'Cancelled' }
+          return false
+        }
+        const msg = err instanceof Error ? err.message : 'Submission failed'
+        state = { step: 'error', message: msg }
+        return false
+      }
     }
 
     for (let i = 0; i < calls.length; i++) {
       state = { step: 'executing', mode: 'sequential', current: i, total: calls.length }
       try {
-        await calls[i].signAndSubmit(signer)
+        const res = await calls[i].signAndSubmit(signer)
+        const txHash = extractTxHash(res)
+        if (txHash) submitted.push({ txHash, chain: params.source })
       } catch (err) {
         const msg = err instanceof Error ? err.message : 'Submission failed'
         state = { step: 'error', message: `Recipient ${i + 1}/${calls.length}: ${msg}` }
         return false
       }
     }
-    state = { step: 'success' }
+    state = { step: 'success', submitted }
     return true
   } catch (err) {
     state = { step: 'error', message: err instanceof Error ? err.message : 'Execution failed' }

@@ -3,7 +3,7 @@
   import { CHAINS, getDecimals } from '../lib/chains'
   import { getWalletState } from '../lib/wallet.svelte'
   import { getBalanceFor } from '../lib/balances.svelte'
-  import { formatBalance, parseAmount } from '../lib/format'
+  import { formatBalance, parseAmount, truncateAddress } from '../lib/format'
   import {
     loadRecipients,
     getFaucets,
@@ -26,6 +26,7 @@
     recipientFromFaucet,
     recipientFromTreasury,
     destinationChain,
+    subscanUrl,
     ALLOWED_SOURCES,
     type DonateRecipient,
   } from '../lib/donate.svelte'
@@ -322,6 +323,20 @@
       {#if source && source !== dest}
         <p class="dim-text">Cross-chain XCM transfers will land at the destination in ~6 minutes.</p>
       {/if}
+      {#if txState.submitted.length > 0}
+        <ul class="submitted-list">
+          {#each txState.submitted as t}
+            {@const link = subscanUrl(t.chain, t.txHash)}
+            <li>
+              <span class="dim-text">{CHAINS[t.chain].name}:</span>
+              <span class="hash">{truncateAddress(t.txHash)}</span>
+              {#if link}
+                <a href={link} target="_blank" rel="noopener" class="subscan-link">view on Subscan ↗</a>
+              {/if}
+            </li>
+          {/each}
+        </ul>
+      {/if}
       <button class="btn btn-primary" onclick={handleReset}>Donate again</button>
     </section>
   {:else if txState.step === 'error'}
@@ -514,6 +529,34 @@
     gap: 0.75rem;
     align-items: center;
     padding: 1.5rem;
+  }
+
+  .submitted-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    width: 100%;
+    font-size: 0.85rem;
+  }
+  .submitted-list li {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    justify-content: center;
+    align-items: baseline;
+  }
+  .submitted-list .hash {
+    font-family: var(--font-mono);
+  }
+  .subscan-link {
+    color: var(--color-accent);
+    text-decoration: none;
+  }
+  .subscan-link:hover {
+    text-decoration: underline;
   }
 
   .success-text {
