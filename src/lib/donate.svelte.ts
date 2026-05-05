@@ -1,9 +1,12 @@
 import { Builder } from '@paraspell/sdk'
+import { AccountId, Binary } from 'polkadot-api'
 import type { PolkadotSigner } from 'polkadot-api'
 import type { ChainId, TokenSymbol } from './types'
 import { toParaSpell, getCurrency } from './chains'
 import { getApiOverrides, getClient } from './provider.svelte'
 import type { Faucet, Treasury } from './recipients.svelte'
+
+const ksmSs58 = AccountId(2)
 
 export type DonateState =
   | { step: 'idle' }
@@ -65,6 +68,7 @@ interface SrcApi {
     ForeignAssets?: { transfer_keep_alive: (args: unknown) => UnsignedTx }
     Assets?: { transfer_keep_alive: (args: unknown) => UnsignedTx }
     Utility: { batch_all: (args: { calls: unknown[] }) => UnsignedTx }
+    PolkadotXcm: { transfer_assets_using_type_and_then: (args: unknown) => UnsignedTx }
   }
 }
 
@@ -86,6 +90,9 @@ const USDC_LOCATION = {
     ],
   },
 }
+
+/** USDC's location on KAH (foreign-asset id from KAH's perspective) — same shape as USDC_LOCATION */
+const USDC_KAH_DEST_LOCATION = USDC_LOCATION
 
 function buildSameChainCall(
   srcApi: SrcApi,
@@ -145,6 +152,24 @@ async function buildPerRecipientCalls(
   if (!srcClient) throw new Error(`No client for ${source}`)
   const srcApi = srcClient.getUnsafeApi() as unknown as SrcApi
 
+  // For bridged routes (currently USDC PAH→KAH), consolidate N recipients into a
+  // single XCM message with multi-DepositAsset on the destination side. Avoids
+  // paying the bridging fee N times.
+  if (source !== dest && recipients.length > 1) {
+    console.log(`[donate] attempting single-XCM consolidation for ${token} ${source}→${dest} (${recipients.length} recipients)`)
+    const consolidated = await tryBuildConsolidatedXcm(
+      source, dest, token,
+      recipients.map((r, i) => ({ address: r.address, amount: amounts[i] })),
+      totalAmount,
+      senderAddress,
+    )
+    if (consolidated) {
+      console.log('[donate] consolidation produced single tx ✓')
+      return [consolidated]
+    }
+    console.log('[donate] consolidation returned null; using per-recipient batch')
+  }
+
   const calls: UnsignedTx[] = []
   for (let i = 0; i < recipients.length; i++) {
     const r = recipients[i]
@@ -156,6 +181,140 @@ async function buildPerRecipientCalls(
     }
   }
   return calls
+}
+
+/**
+ * Attempts to build a single XCM that delivers funds to all recipients in one
+ * cross-chain message via `polkadotXcm.transfer_assets_using_type_and_then`.
+ *
+ * Strategy: let paraspell build a tx for a single recipient with the *total*
+ * amount (so it picks the right TransferType, dest location, BuyExecution, fee
+ * handling). If the resulting call is `transfer_assets_using_type_and_then`,
+ * patch its `custom_xcm_on_dest` to replace the single DepositAsset with N
+ * DepositAssets — first N-1 with `Definite{ id, Fungible(amount) }`, last with
+ * `Wild(AllCounted: 1)` to sweep the bridge-fee remainder.
+ *
+ * Returns `null` if the route isn't a `transfer_assets_using_type_and_then` one
+ * (e.g. KAH→Encointer KSM uses `limited_teleport_assets`); caller falls back to
+ * per-recipient calls + Utility.batch_all.
+ */
+async function tryBuildConsolidatedXcm(
+  source: ChainId,
+  dest: ChainId,
+  token: TokenSymbol,
+  recipients: Array<{ address: string; amount: bigint }>,
+  totalAmount: bigint,
+  senderAddress: string,
+): Promise<UnsignedTx | null> {
+  // Currently only USDC PAH→KAH has a bridge with non-trivial fees per message.
+  // KAH→Encointer KSM is sibling-teleport (cheap) and uses a different call shape.
+  if (!(token === 'USDC' && source === 'pah' && dest === 'kah')) return null
+
+  const overrides = getApiOverrides()
+  if (!overrides) return null
+  const srcClient = getClient(source)
+  if (!srcClient) return null
+  const srcApi = srcClient.getUnsafeApi() as unknown as SrcApi
+
+  // Build paraspell tx for the first recipient with the TOTAL amount.
+  const currency = { ...getCurrency(source, token), amount: totalAmount.toString() }
+  const psTx = await Builder({ apiOverrides: overrides })
+    .from(toParaSpell(source))
+    .to(toParaSpell(dest))
+    .currency(currency)
+    .address(recipients[0].address)
+    .senderAddress(senderAddress)
+    .build()
+
+  // Inspect & patch the decoded call.
+  type DecodedCall = { type?: string; value?: { type?: string; value?: Record<string, unknown> } } & Record<string, unknown>
+  const decoded = (psTx as unknown as { decodedCall: DecodedCall }).decodedCall
+  console.log('[donate] paraspell decodedCall:', JSON.stringify(decoded, (_k, v) => typeof v === 'bigint' ? v.toString() + 'n' : v, 2))
+
+  // Detect call shape: PAPI normalized form or polkadot.js variant-key form.
+  let callArgs: Record<string, unknown> | null = null
+  if (decoded?.type === 'PolkadotXcm' && decoded.value?.type === 'transfer_assets_using_type_and_then') {
+    callArgs = decoded.value.value as Record<string, unknown>
+  } else if (typeof decoded === 'object' && decoded !== null) {
+    // polkadot.js style: { PolkadotXcm: { transfer_assets_using_type_and_then: {...} } }
+    const pxcm = (decoded as Record<string, unknown>).PolkadotXcm as Record<string, unknown> | undefined
+    if (pxcm?.transfer_assets_using_type_and_then) {
+      callArgs = pxcm.transfer_assets_using_type_and_then as Record<string, unknown>
+    }
+  }
+  if (!callArgs) {
+    console.warn(`[donate] paraspell built unexpected call shape for ${source}->${dest}; falling back to per-recipient batch`)
+    return null
+  }
+
+  const xcm = callArgs.custom_xcm_on_dest as { type?: string; value?: unknown[] } & Record<string, unknown>
+  // Detect customXcmOnDest shape: { type: 'V5', value: [...] } OR { V5: [...] }
+  let instructions: Array<Record<string, unknown>> | null = null
+  let xcmStyle: 'papi' | 'pjs' = 'papi'
+  let xcmVersionTag: string = 'V5'
+  if (Array.isArray(xcm.value)) {
+    instructions = xcm.value as Array<Record<string, unknown>>
+    xcmStyle = 'papi'
+    xcmVersionTag = (xcm.type as string) ?? 'V5'
+  } else {
+    for (const key of Object.keys(xcm)) {
+      const v = (xcm as Record<string, unknown>)[key]
+      if (Array.isArray(v)) {
+        instructions = v as Array<Record<string, unknown>>
+        xcmStyle = 'pjs'
+        xcmVersionTag = key
+        break
+      }
+    }
+  }
+  if (!instructions) {
+    console.warn('[donate] could not locate XCM instructions array; falling back', xcm)
+    return null
+  }
+  console.log(`[donate] xcm style=${xcmStyle} version=${xcmVersionTag}; sample instruction:`, instructions[0])
+
+  // Find the DepositAsset (in either style)
+  const isDeposit = (ins: Record<string, unknown>) =>
+    ins.type === 'DepositAsset' || 'DepositAsset' in ins
+  const depIdx = instructions.findIndex(isDeposit)
+  if (depIdx < 0) {
+    console.warn('[donate] no DepositAsset in custom_xcm_on_dest; falling back', instructions)
+    return null
+  }
+
+  // Build per-recipient deposits in the SAME style as paraspell used.
+  const mkInstr = (tag: string, value: unknown) =>
+    xcmStyle === 'papi' ? { type: tag, value } : { [tag]: value }
+  const mkEnum = (tag: string, value: unknown) =>
+    xcmStyle === 'papi' ? { type: tag, value } : { [tag]: value }
+
+  // Note: PAPI flattens `Junctions::X1([Junction; 1])` to a single Junction
+  // (not an array of length 1). X2..X8 do use arrays.
+  const beneficiaryFor = (addr: string) => ({
+    parents: 0,
+    interior: xcmStyle === 'papi'
+      ? { type: 'X1', value: { type: 'AccountId32', value: { network: undefined, id: Binary.fromBytes(ksmSs58.enc(addr)) } } }
+      : { X1: { AccountId32: { network: null, id: Binary.fromBytes(ksmSs58.enc(addr)) } } },
+  })
+
+  const newDeposits = recipients.map((r, i) => {
+    const isLast = i === recipients.length - 1
+    const beneficiary = beneficiaryFor(r.address)
+    const assets = isLast
+      ? mkEnum('Wild', mkEnum('AllCounted', 1))
+      : mkEnum('Definite', [{ id: USDC_KAH_DEST_LOCATION, fun: mkEnum('Fungible', r.amount) }])
+    return mkInstr('DepositAsset', { assets, beneficiary })
+  })
+
+  instructions.splice(depIdx, 1, ...newDeposits)
+  console.log('[donate] patched custom_xcm_on_dest:', JSON.stringify(instructions, (_k, v) => typeof v === 'bigint' ? v.toString() + 'n' : v, 2))
+
+  try {
+    return srcApi.tx.PolkadotXcm.transfer_assets_using_type_and_then(callArgs)
+  } catch (err) {
+    console.warn('[donate] failed to re-encode patched call; falling back', err)
+    return null
+  }
 }
 
 async function buildBatch(source: ChainId, calls: UnsignedTx[]): Promise<UnsignedTx | null> {
