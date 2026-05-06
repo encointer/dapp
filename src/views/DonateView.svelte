@@ -39,6 +39,8 @@
   // it to undefined prevents re-applying after the user adjusts.
   const initialUrl = parseDonateUrlParams()
 
+  let showWeightingInfo = $state(false)
+
   let token = $state<TokenSymbol>(initialUrl.token ?? 'KSM')
   let source = $state<ChainId | null>(
     initialUrl.source && (initialUrl.token ? ALLOWED_SOURCES[initialUrl.token].includes(initialUrl.source) : true)
@@ -179,6 +181,40 @@
 
   const totalAmount = $derived(parseAmount(amountStr, decimals))
 
+  // Weighted distribution per community (USDC):
+  //   weight = reputables × √(3m turnover USDC) ÷ √(treasury balance USDC)
+  // — reputables = community-size baseline, √turnover = activity bonus (damped),
+  //   1/√treasury = "neediness" factor (well-funded treasuries get less).
+  // Treasury balance is floored at 1 USDC to keep the divisor sane for empty pots.
+  // Recipients without any data fall back to weight 1.
+  const TREASURY_FLOOR_USDC = 1
+  const recipientWeights = $derived.by<number[]>(() => {
+    return selectedRecipients.map(r => {
+      if (token === 'USDC') {
+        const t = treasuries.find(x => x.kahAccount === r.id)
+        if (t) {
+          const reputables = Math.max(0, t.regularlyActivePersons ?? 0)
+          const turnoverUsd = Math.max(0, t.turnoverLast3MonthsUsdc ?? 0)
+          const treasuryUsd = Math.max(TREASURY_FLOOR_USDC, Number(t.usdcBalance) / 1e6)
+          const w = (reputables * Math.sqrt(turnoverUsd)) / Math.sqrt(treasuryUsd)
+          return Number.isFinite(w) && w > 0 ? w : 1
+        }
+      }
+      return 1
+    })
+  })
+
+  const weightingActive = $derived(
+    recipientWeights.length > 1 &&
+    !recipientWeights.every(w => w === recipientWeights[0]),
+  )
+
+  const perRecipientAmounts = $derived(
+    totalAmount && selectedRecipients.length > 0
+      ? splitAmount(totalAmount, selectedRecipients.length, weightingActive ? recipientWeights : undefined)
+      : null,
+  )
+
   // Soft-warn when the donation looks excessive vs. recent community activity.
   // - USDC: compare to sum of selected treasuries' last-3-months turnover (in USDC).
   //         If none of them have turnover data loaded yet, skip the check.
@@ -217,11 +253,6 @@
     }
   })
 
-  const perRecipient = $derived.by(() => {
-    if (!totalAmount || selectionCount() === 0) return null
-    const splits = splitAmount(totalAmount, selectionCount())
-    return splits[splits.length - 1] // base share (last == base, first has remainder)
-  })
 
   // Available balance on the chosen source for the chosen token (already net of ED).
   // Returns null while balances haven't been fetched yet for that chain.
@@ -263,7 +294,10 @@
   async function handleContinue() {
     if (!validSource || !wallet.address || !totalAmount) return
     await estimateDonate(
-      { token, source: validSource, recipients: selectedRecipients, totalAmount },
+      {
+        token, source: validSource, recipients: selectedRecipients, totalAmount,
+        weights: weightingActive ? recipientWeights : undefined,
+      },
       wallet.address,
     )
   }
@@ -271,7 +305,10 @@
   async function handleConfirm() {
     if (!validSource || !wallet.address || !wallet.signer || !totalAmount) return
     const ok = await executeDonate(
-      { token, source: validSource, recipients: selectedRecipients, totalAmount },
+      {
+        token, source: validSource, recipients: selectedRecipients, totalAmount,
+        weights: weightingActive ? recipientWeights : undefined,
+      },
       wallet.signer,
       wallet.address,
     )
@@ -416,12 +453,53 @@
         {/if}
       </div>
 
-      {#if perRecipient !== null && selectionCount() > 1}
-        <div class="form-row sub">
+      {#if perRecipientAmounts && selectionCount() > 1}
+        <div class="form-row sub recipient-breakdown">
           <span class="form-label"></span>
-          <span class="dim-text">
-            ≈ {formatBalance(perRecipient, decimals)} {token} per recipient
-          </span>
+          <div class="breakdown-body">
+            <div class="breakdown-header">
+              <span>Distribution</span>
+              {#if weightingActive}
+                <span class="weighted-tag">weighted by activity</span>
+                <button
+                  type="button"
+                  class="info-btn"
+                  aria-label="How is the donation weighted?"
+                  aria-expanded={showWeightingInfo}
+                  onclick={() => showWeightingInfo = !showWeightingInfo}
+                >ⓘ</button>
+              {/if}
+            </div>
+            {#if weightingActive && showWeightingInfo}
+              <div class="info-popover" role="dialog">
+                <strong>Weighted by community activity & need</strong>
+                <div class="formula"><code>weight = reputables × √(3m turnover USDC) ÷ √(treasury balance USDC)</code></div>
+                <p>
+                  <strong>Reputables</strong> — the regularly-active unique persons attested in the
+                  community — set the community-size baseline.
+                </p>
+                <p>
+                  <strong>√(turnover)</strong> rewards economic activity, with the square root damping
+                  large differences (100× turnover → 10× boost).
+                </p>
+                <p>
+                  <strong>÷√(treasury)</strong> shifts share toward under-funded treasuries: doubling
+                  the existing pot roughly halves the new share.
+                </p>
+                <p class="dim-text">
+                  Each share = total × (weight<sub>i</sub> ÷ Σ weights). Rounding residual goes to the first recipient.
+                </p>
+              </div>
+            {/if}
+            <ul class="breakdown-list">
+              {#each selectedRecipients as r, i}
+                <li>
+                  <span class="r-name">{r.label}</span>
+                  <span class="r-amount mono">{formatBalance(perRecipientAmounts[i], decimals)} {token}</span>
+                </li>
+              {/each}
+            </ul>
+          </div>
         </div>
       {/if}
 
@@ -703,6 +781,90 @@
     line-height: 1.4;
     text-align: center;
   }
+
+  .recipient-breakdown {
+    align-items: stretch;
+  }
+  .breakdown-body {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+  }
+  .breakdown-header {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.8rem;
+    color: var(--color-text-dim);
+  }
+  .weighted-tag {
+    font-size: 0.7rem;
+    padding: 0.05rem 0.4rem;
+    border: 1px solid var(--color-border);
+    border-radius: 999px;
+    color: var(--color-text-dim);
+  }
+  .info-btn {
+    width: 1.1rem;
+    height: 1.1rem;
+    padding: 0;
+    border: 1px solid var(--color-border);
+    border-radius: 50%;
+    background: transparent;
+    color: var(--color-text-dim);
+    font-size: 0.7rem;
+    line-height: 1;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .info-btn:hover {
+    color: var(--color-accent);
+    border-color: var(--color-accent);
+  }
+  .info-popover {
+    padding: 0.55rem 0.7rem;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    background: var(--color-surface-hover);
+    font-size: 0.78rem;
+    line-height: 1.45;
+  }
+  .info-popover strong { display: block; margin-bottom: 0.2rem; }
+  .info-popover .formula {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    margin: 0.2rem 0 0.35rem;
+    color: var(--color-text);
+  }
+  .info-popover p {
+    margin: 0.25rem 0;
+    color: var(--color-text-dim);
+  }
+  .breakdown-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    font-size: 0.82rem;
+  }
+  .breakdown-list li {
+    display: flex;
+    justify-content: space-between;
+    gap: 0.5rem;
+  }
+  .breakdown-list .r-name {
+    color: var(--color-text);
+  }
+  .breakdown-list .r-amount {
+    color: var(--color-text-dim);
+  }
+  .mono { font-family: var(--font-mono); }
 
   .summary {
     display: flex;
