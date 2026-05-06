@@ -122,7 +122,12 @@
   const recipients = $derived<DonateRecipient[]>(
     token === 'KSM'
       ? faucets.map(recipientFromFaucet)
-      : treasuries.filter(t => !!t.kahAccount).map(recipientFromTreasury),
+      : [...treasuries]
+          .filter(t => !!t.kahAccount)
+          // Order by regularly-active count, descending. Communities whose
+          // count is still loading (null) sort to the bottom.
+          .sort((a, b) => (b.regularlyActivePersons ?? -1) - (a.regularlyActivePersons ?? -1))
+          .map(recipientFromTreasury),
   )
 
   const disabledIds = $derived(
@@ -308,6 +313,9 @@
         See <a href="https://book.encointer.org/protocol-treasuries.html" target="_blank" rel="noopener">treasuries</a>.
       </li>
     </ul>
+    <p class="intro-cta">
+      <a href="https://encointer.org/our-communities/" target="_blank" rel="noopener">Get to know our communities ↗</a>
+    </p>
   </section>
 
   {#if recipientsLoading && !isRecipientsLoaded()}
@@ -345,14 +353,12 @@
               type="button"
             >
               <span class="chain-name">{CHAINS[c].name}</span>
-              <span class="chain-balance" class:placeholder={!wallet.connected || !bal}>
-                <span class="dim-text">your balance:</span>
-                {#if !wallet.connected}
-                  0 {token}
-                {:else}
+              {#if wallet.connected}
+                <span class="chain-balance" class:placeholder={!bal}>
+                  <span class="dim-text">your balance:</span>
                   {bal ? formatBalance(bal.transferable, cDecimals) : '—'} {token}
-                {/if}
-              </span>
+                </span>
+              {/if}
               {#if c !== dest}
                 <span class="badge">cross-chain</span>
               {/if}
@@ -524,6 +530,11 @@
   }
   .intro strong {
     color: var(--color-text);
+  }
+  .intro-cta {
+    text-align: center;
+    margin-top: 0.6rem !important;
+    font-weight: 500;
   }
   .intro a {
     color: var(--color-accent);
