@@ -1,7 +1,7 @@
 import { AccountId, Binary } from 'polkadot-api'
 import { getClient } from './provider.svelte'
 import { getTurnoverLastNMonths, getCurrentReputables } from './accountingApi'
-import { convertCcToUsd, ksmToUsdc } from './forex'
+import { convertCcToUsd, convertUsdToCc, ksmToUsdc } from './forex'
 
 const ENCOINTER_PARA_ID = 1001
 const KSM_SS58_PREFIX = 2
@@ -54,6 +54,12 @@ export interface Treasury {
   /** Approximate USDC value of the 3-month turnover, derived via known-community
    *  fiat rates + currency-api USD→fiat. `null` if unknown community or forex failed. */
   turnoverLast3MonthsUsdc: number | null
+  /** Money supply: total CC issued for this community (raw principal,
+   *  pre-demurrage). `null` once on-chain query completes if unavailable. */
+  moneySupply: number | null
+  /** USDC balance expressed as CC equivalent (treasury USDC × CC/USD forex rate).
+   *  `null` if unknown community or forex failed. */
+  treasuryCcEquivalent: number | null
 }
 
 const TREASURY_FIXTURE: Record<string, { name: string; encointerAccount: string; kahAccount: string }> = {
@@ -331,6 +337,19 @@ async function loadTreasuries(
       })
     }
 
+    let moneySupply: number | null = null
+    try {
+      const issuance = await encApi.query.EncointerBalances.TotalIssuance.getValue(cidObj) as unknown
+      const bits = extractFixedBits(issuance && typeof issuance === 'object' ? (issuance as { principal?: unknown }).principal : null)
+      if (bits != null) {
+        moneySupply = parseFixedI64F64(bits)
+      } else if (issuance) {
+        console.warn(`[recipients] unexpected TotalIssuance shape for ${cidStr}:`, issuance)
+      }
+    } catch (err) {
+      console.warn(`[recipients] money supply query failed for ${cidStr}`, err)
+    }
+
     const info = COMMUNITY_INFO[cidStr] ?? {}
     result.push({
       cid: cidStr,
@@ -347,15 +366,49 @@ async function loadTreasuries(
       turnoverLast3Months: null,
       turnoverLoading: true,
       turnoverLast3MonthsUsdc: null,
+      moneySupply,
+      treasuryCcEquivalent: null,
     })
   }
   return result
+}
+
+/** Parse encointer's BalanceType (i64F64 fixed-point: 64 fractional bits). */
+function parseFixedI64F64(bits: bigint | string | number): number {
+  const n = typeof bits === 'bigint' ? bits : BigInt(typeof bits === 'string' ? bits.replace(/,/g, '') : bits)
+  // Treat as signed 128-bit; for our use case (issuance) the value is always non-negative.
+  const intPart = Number(n >> 64n)
+  const fracPart = Number(n & ((1n << 64n) - 1n)) / 2 ** 64
+  return intPart + fracPart
+}
+
+/** PAPI may render `BalanceType { bits: i128 }` either as `{ bits: ... }`
+ *  or flattened to the inner i128 (bigint/string/number). Tolerate both. */
+function extractFixedBits(v: unknown): bigint | string | number | null {
+  if (v == null) return null
+  if (typeof v === 'bigint' || typeof v === 'number') return v
+  if (typeof v === 'string' && /^-?[\d,]+$/.test(v)) return v
+  if (typeof v === 'object') {
+    const b = (v as { bits?: unknown }).bits
+    if (typeof b === 'bigint' || typeof b === 'number') return b
+    if (typeof b === 'string') return b
+  }
+  return null
 }
 
 async function fetchFaucetDripUsdcInto(account: string, dripAmount: bigint) {
   const usdc = await ksmToUsdc(dripAmount)
   const f = faucets.find(x => x.account === account)
   if (f) f.dripUsdc = usdc
+}
+
+async function fetchTreasuryCcEquivalentInto(cid: string) {
+  const t = treasuries.find(x => x.cid === cid)
+  if (!t || !t.symbol) return
+  const usdc = Number(t.usdcBalance) / 1e6
+  const cc = await convertUsdToCc(t.symbol, usdc)
+  const after = treasuries.find(x => x.cid === cid)
+  if (after) after.treasuryCcEquivalent = cc
 }
 
 async function fetchRegularlyActiveInto(cid: string) {
@@ -419,10 +472,11 @@ export async function loadRecipients() {
     faucets = f
     treasuries = t
     loadedOnce = true
-    // Fire turnover + reputables + KSM/USDC quote fetches in parallel; mutate entries as they land.
+    // Fire turnover + reputables + CC-equivalent + KSM/USDC quote fetches in parallel.
     for (const tr of treasuries) {
       void fetchTurnoverInto(tr.cid)
       void fetchRegularlyActiveInto(tr.cid)
+      void fetchTreasuryCcEquivalentInto(tr.cid)
     }
     for (const fc of faucets) {
       void fetchFaucetDripUsdcInto(fc.account, fc.dripAmount)

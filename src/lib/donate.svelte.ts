@@ -52,6 +52,9 @@ export interface DonateParams {
   source: ChainId
   recipients: DonateRecipient[]
   totalAmount: bigint
+  /** Optional per-recipient weights (positive numbers). When provided and not
+   *  all-equal/all-zero, the donation is split proportionally; otherwise even. */
+  weights?: number[]
 }
 
 let state = $state<DonateState>({ step: 'idle' })
@@ -69,8 +72,25 @@ export function destinationChain(token: TokenSymbol): ChainId {
   return destChainFor(token)
 }
 
-export function splitAmount(total: bigint, n: number): bigint[] {
+export function splitAmount(total: bigint, n: number, weights?: number[]): bigint[] {
   if (n <= 0) return []
+  // Weighted path: only kicks in when weights are supplied AND vary.
+  if (weights && weights.length === n) {
+    const finite = weights.map(w => Number.isFinite(w) && w > 0 ? w : 0)
+    const sum = finite.reduce((s, w) => s + w, 0)
+    const allEqual = finite.every(w => w === finite[0])
+    if (sum > 0 && !allEqual) {
+      // Scale to integer to avoid float precision in BigInt math.
+      const SCALE = 1_000_000_000
+      const scaled = finite.map(w => BigInt(Math.round((w / sum) * SCALE)))
+      const scaledSum = scaled.reduce((s, x) => s + x, 0n)
+      const shares = scaled.map(s => (total * s) / scaledSum)
+      const residual = total - shares.reduce((s, x) => s + x, 0n)
+      shares[0] += residual
+      return shares
+    }
+  }
+  // Even split (default): residual goes to first.
   const base = total / BigInt(n)
   const remainder = total % BigInt(n)
   return Array.from({ length: n }, (_, i) => (i === 0 ? base + remainder : base))
@@ -166,9 +186,9 @@ async function buildPerRecipientCalls(
   params: DonateParams,
   senderAddress: string,
 ): Promise<UnsignedTx[]> {
-  const { token, source, recipients, totalAmount } = params
+  const { token, source, recipients, totalAmount, weights } = params
   const dest = destChainFor(token)
-  const amounts = splitAmount(totalAmount, recipients.length)
+  const amounts = splitAmount(totalAmount, recipients.length, weights)
 
   const srcClient = getClient(source)
   if (!srcClient) throw new Error(`No client for ${source}`)

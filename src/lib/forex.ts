@@ -65,6 +65,15 @@ export async function convertCcToUsd(symbol: string, ccAmount: number): Promise<
   return ccAmount / ccPerUsd
 }
 
+/** Inverse of convertCcToUsd: USD amount → CC equivalent for the given symbol. */
+export async function convertUsdToCc(symbol: string, usdAmount: number): Promise<number | null> {
+  const k = KNOWN_COMMUNITIES[symbol.toUpperCase()]
+  if (!k) return null
+  const usdToFiat = await cachedUsdToFiat(k.fiat)
+  if (usdToFiat == null) return null
+  return usdAmount * k.localFiatRate * usdToFiat
+}
+
 // USDC per 1 KSM (live quote via KAH AssetConversion pool). Cached for the
 // session; refreshed if the call is retried after a null result.
 //

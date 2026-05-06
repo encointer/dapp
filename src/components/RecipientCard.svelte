@@ -112,39 +112,66 @@
       </div>
     </div>
   {:else}
+    {@const t = props.data}
+    {@const sym = t.symbol || 'CC'}
+    {@const fmtCc = (v: number | null) => v == null ? '—' : v.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+    {@const pctOfSupply = t.treasuryCcEquivalent !== null && t.moneySupply !== null && t.moneySupply > 0
+      ? (t.treasuryCcEquivalent / t.moneySupply) * 100 : null}
+    {@const pctOfTurnover = t.treasuryCcEquivalent !== null && t.turnoverLast3Months !== null && t.turnoverLast3Months > 0
+      ? (t.treasuryCcEquivalent / t.turnoverLast3Months) * 100 : null}
+    {@const fmtPct = (p: number | null) =>
+      p == null ? '—' : p >= 100 ? p.toFixed(0) + '%' : p >= 10 ? p.toFixed(1) + '%' : p.toFixed(2) + '%'}
     <div class="info">
       <div class="row">
         <span class="title">
-          {props.data.name}
+          {t.name}
           {#if isDisabled}
             <span class="disabled-badge">donations disabled</span>
           {/if}
         </span>
       </div>
       <div class="line dim-text">
-        cid {props.data.cid}{#if props.data.location} — {props.data.location}{/if}
+        cid {t.cid}{#if t.location} — {t.location}{/if}
       </div>
+
+      <div class="kpi-row">
+        <div class="kpi" class:placeholder={pctOfSupply == null}>
+          <div class="kpi-value">{fmtPct(pctOfSupply)}</div>
+          <div class="kpi-label">reserves / total issuance of {sym}</div>
+        </div>
+        <div class="kpi" class:placeholder={pctOfTurnover == null}>
+          <div class="kpi-value">{fmtPct(pctOfTurnover)}</div>
+          <div class="kpi-label">reserves / 3m turnover</div>
+        </div>
+      </div>
+
       <div class="line">
         Currently available in the pot:
-        <span class="mono">{formatBalance(props.data.usdcBalance, 6)} USDC</span>
+        <span class="mono">{formatBalance(t.usdcBalance, 6)} USDC</span>
+        {#if t.treasuryCcEquivalent !== null}
+          <span class="dim-text">≈ {fmtCc(t.treasuryCcEquivalent)} {sym}</span>
+        {/if}
       </div>
       <div class="line">
-        {#if props.data.regularlyActivePersonsLoading}
+        Total community currency issuance: <span class="mono">{fmtCc(t.moneySupply)} {sym}</span>
+      </div>
+      <div class="line">
+        {#if t.regularlyActivePersonsLoading}
           <span class="spinner spinner-sm"></span> regularly active unique persons
-        {:else if props.data.regularlyActivePersons !== null}
-          {props.data.regularlyActivePersons} regularly active unique persons
+        {:else if t.regularlyActivePersons !== null}
+          {t.regularlyActivePersons} regularly active unique persons
         {:else}
           regularly active unique persons: <span class="dim-text">—</span>
         {/if}
       </div>
       <div class="line">
         Turnover (last 3 full months):
-        {#if props.data.turnoverLoading}
+        {#if t.turnoverLoading}
           <span class="spinner spinner-sm"></span>
-        {:else if props.data.turnoverLast3Months !== null}
-          <span class="mono">{props.data.turnoverLast3Months.toLocaleString(undefined, { maximumFractionDigits: 0 })} {props.data.symbol || 'CC'}</span>
-          {#if props.data.turnoverLast3MonthsUsdc !== null}
-            <span class="dim-text">≈ {props.data.turnoverLast3MonthsUsdc.toLocaleString(undefined, { maximumFractionDigits: 0 })} USDC</span>
+        {:else if t.turnoverLast3Months !== null}
+          <span class="mono">{fmtCc(t.turnoverLast3Months)} {sym}</span>
+          {#if t.turnoverLast3MonthsUsdc !== null}
+            <span class="dim-text">≈ {fmtCc(t.turnoverLast3MonthsUsdc)} USDC</span>
           {/if}
         {:else}
           —
@@ -322,5 +349,35 @@
 
   .mono {
     font-family: var(--font-mono);
+  }
+
+  .kpi-row {
+    display: flex;
+    gap: 0.5rem;
+    margin: 0.4rem 0 0.2rem;
+  }
+  .kpi {
+    flex: 1;
+    padding: 0.4rem 0.5rem;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    background: var(--color-surface-hover);
+    text-align: center;
+    line-height: 1.15;
+  }
+  .kpi-value {
+    font-family: var(--font-mono);
+    font-size: 1.05rem;
+    font-weight: 700;
+    color: var(--color-accent);
+  }
+  .kpi-label {
+    font-size: 0.7rem;
+    color: var(--color-text-dim);
+    margin-top: 0.1rem;
+  }
+  .kpi.placeholder .kpi-value {
+    color: var(--color-text-dim);
+    opacity: 0.6;
   }
 </style>
