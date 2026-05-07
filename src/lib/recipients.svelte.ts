@@ -54,12 +54,15 @@ export interface Treasury {
   /** Approximate USDC value of the 3-month turnover, derived via known-community
    *  fiat rates + currency-api USD→fiat. `null` if unknown community or forex failed. */
   turnoverLast3MonthsUsdc: number | null
+  /** True while either the CC turnover OR its USDC conversion is still pending. */
+  turnoverUsdcLoading: boolean
   /** Money supply: total CC issued for this community (raw principal,
    *  pre-demurrage). `null` once on-chain query completes if unavailable. */
   moneySupply: number | null
   /** USDC balance expressed as CC equivalent (treasury USDC × CC/USD forex rate).
    *  `null` if unknown community or forex failed. */
   treasuryCcEquivalent: number | null
+  treasuryCcEquivalentLoading: boolean
 }
 
 const TREASURY_FIXTURE: Record<string, { name: string; encointerAccount: string; kahAccount: string }> = {
@@ -366,8 +369,10 @@ async function loadTreasuries(
       turnoverLast3Months: null,
       turnoverLoading: true,
       turnoverLast3MonthsUsdc: null,
+      turnoverUsdcLoading: true,
       moneySupply,
       treasuryCcEquivalent: null,
+      treasuryCcEquivalentLoading: true,
     })
   }
   return result
@@ -404,11 +409,19 @@ async function fetchFaucetDripUsdcInto(account: string, dripAmount: bigint) {
 
 async function fetchTreasuryCcEquivalentInto(cid: string) {
   const t = treasuries.find(x => x.cid === cid)
-  if (!t || !t.symbol) return
+  if (!t) return
+  if (!t.symbol) {
+    t.treasuryCcEquivalent = null
+    t.treasuryCcEquivalentLoading = false
+    return
+  }
   const usdc = Number(t.usdcBalance) / 1e6
   const cc = await convertUsdToCc(t.symbol, usdc)
   const after = treasuries.find(x => x.cid === cid)
-  if (after) after.treasuryCcEquivalent = cc
+  if (after) {
+    after.treasuryCcEquivalent = cc
+    after.treasuryCcEquivalentLoading = false
+  }
 }
 
 async function fetchRegularlyActiveInto(cid: string) {
@@ -429,7 +442,13 @@ async function fetchTurnoverInto(cid: string) {
   if (v !== null && v > 0 && t.symbol) {
     const usdc = await convertCcToUsd(t.symbol, v)
     const after = treasuries.find(x => x.cid === cid)
-    if (after) after.turnoverLast3MonthsUsdc = usdc
+    if (after) {
+      after.turnoverLast3MonthsUsdc = usdc
+      after.turnoverUsdcLoading = false
+    }
+  } else {
+    // No CC turnover, or unknown symbol — there's nothing more to load.
+    t.turnoverUsdcLoading = false
   }
 }
 

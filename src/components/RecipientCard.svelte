@@ -121,6 +121,8 @@
       ? (t.treasuryCcEquivalent / t.turnoverLast3Months) * 100 : null}
     {@const fmtPct = (p: number | null) =>
       p == null ? '—' : p >= 100 ? p.toFixed(0) + '%' : p >= 10 ? p.toFixed(1) + '%' : p.toFixed(2) + '%'}
+    {@const supplyLoading = t.treasuryCcEquivalentLoading}
+    {@const turnoverKpiLoading = t.treasuryCcEquivalentLoading || t.turnoverLoading}
     <div class="info">
       <div class="row">
         <span class="title">
@@ -135,12 +137,28 @@
       </div>
 
       <div class="kpi-row">
-        <div class="kpi" class:placeholder={pctOfSupply == null}>
-          <div class="kpi-value">{fmtPct(pctOfSupply)}</div>
+        <div class="kpi" class:placeholder={!supplyLoading && pctOfSupply == null}>
+          <div class="kpi-value">
+            {#if supplyLoading}
+              <span class="spinner spinner-sm"></span>
+            {:else if pctOfSupply !== null}
+              {fmtPct(pctOfSupply)}
+            {:else}
+              <span class="data-broken" title="Underlying data currently unavailable">⚠</span>
+            {/if}
+          </div>
           <div class="kpi-label">reserves / total issuance of {sym}</div>
         </div>
-        <div class="kpi" class:placeholder={pctOfTurnover == null}>
-          <div class="kpi-value">{fmtPct(pctOfTurnover)}</div>
+        <div class="kpi" class:placeholder={!turnoverKpiLoading && pctOfTurnover == null}>
+          <div class="kpi-value">
+            {#if turnoverKpiLoading}
+              <span class="spinner spinner-sm"></span>
+            {:else if pctOfTurnover !== null}
+              {fmtPct(pctOfTurnover)}
+            {:else}
+              <span class="data-broken" title="Underlying data currently unavailable">⚠</span>
+            {/if}
+          </div>
           <div class="kpi-label">reserves / 3m turnover</div>
         </div>
       </div>
@@ -148,7 +166,9 @@
       <div class="line">
         Currently available in the pot:
         <span class="mono">{formatBalance(t.usdcBalance, 6)} USDC</span>
-        {#if t.treasuryCcEquivalent !== null}
+        {#if t.treasuryCcEquivalentLoading}
+          <span class="spinner spinner-sm"></span>
+        {:else if t.treasuryCcEquivalent !== null}
           <span class="dim-text">≈ {fmtCc(t.treasuryCcEquivalent)} {sym}</span>
         {/if}
       </div>
@@ -161,7 +181,7 @@
         {:else if t.regularlyActivePersons !== null}
           {t.regularlyActivePersons} regularly active unique persons
         {:else}
-          regularly active unique persons: <span class="dim-text">—</span>
+          <span class="data-broken" title="Couldn't fetch reputables count from accounting-backend">⚠ reputables count currently unavailable</span>
         {/if}
       </div>
       <div class="line">
@@ -170,11 +190,13 @@
           <span class="spinner spinner-sm"></span>
         {:else if t.turnoverLast3Months !== null}
           <span class="mono">{fmtCc(t.turnoverLast3Months)} {sym}</span>
-          {#if t.turnoverLast3MonthsUsdc !== null}
+          {#if t.turnoverUsdcLoading}
+            <span class="spinner spinner-sm"></span>
+          {:else if t.turnoverLast3MonthsUsdc !== null}
             <span class="dim-text">≈ {fmtCc(t.turnoverLast3MonthsUsdc)} USDC</span>
           {/if}
         {:else}
-          —
+          <span class="data-broken" title="Couldn't fetch turnover from accounting-backend">⚠ currently unavailable</span>
         {/if}
       </div>
       <div class="line meta">
@@ -379,5 +401,14 @@
   .kpi.placeholder .kpi-value {
     color: var(--color-text-dim);
     opacity: 0.6;
+  }
+
+  .data-broken {
+    color: var(--color-warning, #c98a00);
+    font-size: 0.85em;
+    cursor: help;
+  }
+  .kpi-value .data-broken {
+    font-size: 1em;
   }
 </style>
