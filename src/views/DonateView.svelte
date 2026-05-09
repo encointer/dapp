@@ -41,7 +41,7 @@
 
   let showWeightingInfo = $state(false)
 
-  let token = $state<TokenSymbol>(initialUrl.token ?? 'KSM')
+  let token = $state<TokenSymbol>(initialUrl.token ?? 'USDC')
   let source = $state<ChainId | null>(
     initialUrl.source && (initialUrl.token ? ALLOWED_SOURCES[initialUrl.token].includes(initialUrl.source) : true)
       ? initialUrl.source
