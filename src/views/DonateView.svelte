@@ -527,7 +527,64 @@
         <div><span class="dim-text">Recipients:</span> {selectionCount()}</div>
         <div><span class="dim-text">Total:</span> {totalAmount ? formatBalance(totalAmount, decimals) : '—'} {token}</div>
         <div><span class="dim-text">Mode:</span> {txState.mode === 'batch' ? 'single batched signature' : `${selectedRecipients.length} signatures`}</div>
-        <div><span class="dim-text">Estimated fee:</span> {formatBalance(txState.fee, txState.feeDecimals)} {txState.feeSymbol}</div>
+        <div>
+          <span class="dim-text">Estimated fee:</span> {formatBalance(txState.fee, txState.feeDecimals)} {txState.feeSymbol}
+          {#if txState.feeNative !== undefined && txState.feeNativeSymbol && txState.feeNativeDecimals !== undefined}
+            <span class="dim-text">
+              (≈ {formatBalance(txState.feeNative, txState.feeNativeDecimals)} {txState.feeNativeSymbol} swapped via AssetConversion)
+            </span>
+          {/if}
+        </div>
+        {#if txState.dryRun}
+          <div class="dry-run-summary">
+            <span class="dim-text">Pre-flight checks:</span>
+            <ul>
+              <li class:ok={txState.dryRun.sourceOk}>
+                {txState.dryRun.sourceOk ? '✓' : '✗'} source ({source ? CHAINS[source].name : ''}): {txState.dryRun.sourceOk ? 'dispatch would succeed' : (txState.dryRun.sourceMessage ?? 'failed')}
+              </li>
+              {#each txState.dryRun.destinations as d}
+                <li class:ok={d.ok}>
+                  {d.ok ? '✓' : '✗'} destination ({CHAINS[d.destChain].name}): {d.ok ? 'XCM would execute Complete' : (d.errorMessage ?? 'failed')}
+                </li>
+              {/each}
+            </ul>
+          </div>
+        {/if}
+        {#if txState.dryRun?.balance}
+          {@const bal = txState.dryRun.balance}
+          {@const usdcOut = bal.sourceUsdcDelta < 0n ? -bal.sourceUsdcDelta : 0n}
+          {@const nativeDecimals = source === 'pah' ? 10 : 12}
+          {@const nativeSymbol = source === 'pah' ? 'DOT' : 'KSM'}
+          {@const nativeAbs = bal.sourceNativeDelta < 0n ? -bal.sourceNativeDelta : bal.sourceNativeDelta}
+          {@const nativeSign = bal.sourceNativeDelta < 0n ? '−' : '+'}
+          <div class="net-effect">
+            <span class="dim-text">Net effect:</span>
+            <ul>
+              <li>
+                <span class="dim-text">USDC charged from your account:</span>
+                <span class="mono">{formatBalance(usdcOut, 6)} USDC</span>
+              </li>
+              <li>
+                <span class="dim-text">{nativeSymbol} change:</span>
+                <span class="mono">{nativeSign}{formatBalance(nativeAbs, nativeDecimals)} {nativeSymbol}</span>
+                {#if bal.sourceNativeFinal !== null}
+                  <span class="dim-text">→ remaining {formatBalance(bal.sourceNativeFinal < 0n ? 0n : bal.sourceNativeFinal, nativeDecimals)} {nativeSymbol}</span>
+                {/if}
+              </li>
+              <li>
+                <span class="dim-text">Recipients receive:</span>
+                <ul class="recipient-receipts">
+                  {#each bal.recipientReceipts as r}
+                    <li>
+                      <span>{r.label}</span>
+                      <span class="mono">{formatBalance(r.received, 6)} USDC</span>
+                    </li>
+                  {/each}
+                </ul>
+              </li>
+            </ul>
+          </div>
+        {/if}
       </div>
       <div class="actions">
         <button class="btn btn-ghost" onclick={handleBack}>Back</button>
@@ -873,6 +930,46 @@
     margin: 0.5rem 0 1rem;
     font-size: 0.9rem;
   }
+
+  .dry-run-summary,
+  .net-effect {
+    margin-top: 0.4rem;
+    padding: 0.55rem 0.7rem;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    background: var(--color-surface-hover);
+    font-size: 0.8rem;
+  }
+  .dry-run-summary ul,
+  .net-effect ul {
+    list-style: none;
+    padding: 0.3rem 0 0 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+  }
+  .dry-run-summary li {
+    color: var(--color-danger, #b13030);
+  }
+  .dry-run-summary li.ok {
+    color: var(--color-success, #058257);
+  }
+  .net-effect li {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    align-items: baseline;
+  }
+  .net-effect .recipient-receipts {
+    width: 100%;
+    padding-left: 0.8rem;
+    margin: 0.1rem 0 0;
+  }
+  .net-effect .recipient-receipts li {
+    justify-content: space-between;
+  }
+  .mono { font-family: var(--font-mono); }
 
   .actions {
     display: flex;
