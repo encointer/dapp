@@ -2,14 +2,32 @@
   import type { HopFee, TransferParams } from '../lib/types'
   import { getChain, getDecimals } from '../lib/chains'
   import { formatBalance } from '../lib/format'
+  import { getSs58AddressInfo } from 'polkadot-api'
 
   interface Props {
     fees: HopFee[]
     params: TransferParams
+    senderAddress: string | null
   }
-  let { fees, params }: Props = $props()
+  let { fees, params, senderAddress }: Props = $props()
 
   const decimals = $derived(getDecimals(params.destination, params.token))
+
+  // Hide the totalling row entirely when there are no XCM fees to subtract
+  // (same-chain transfers — recipient gets exactly `amount`).
+  const hasAnyXcmFees = $derived(fees.some(f => f.origin.fee > 0n || f.destination.fee > 0n))
+
+  function pubKeyHex(addr: string | null): string | null {
+    if (!addr) return null
+    const info = getSs58AddressInfo(addr)
+    if (!info.isValid) return null
+    return Array.from(info.publicKey).map(b => b.toString(16).padStart(2, '0')).join('')
+  }
+  const isSelfTransfer = $derived.by(() => {
+    const a = pubKeyHex(senderAddress)
+    const b = pubKeyHex(params.recipient)
+    return !!a && !!b && a === b
+  })
 </script>
 
 <div class="fees card">
@@ -43,10 +61,12 @@
       </div>
     {/if}
   {/each}
-  <div class="fee-row receive">
-    <span>You receive</span>
-    <span>~{formatBalance(params.amount, decimals)} {params.token}</span>
-  </div>
+  {#if hasAnyXcmFees}
+    <div class="fee-row receive">
+      <span>{isSelfTransfer ? 'You receive' : 'Recipient receives'}</span>
+      <span>~{formatBalance(params.amount, decimals)} {params.token}</span>
+    </div>
+  {/if}
 </div>
 
 <style>

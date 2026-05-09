@@ -73,8 +73,14 @@ describe('resolveRoute', () => {
     })
   })
 
-  it('returns null for same chain', () => {
-    expect(resolveRoute('KSM', 'kah', 'kah')).toBeNull()
+  it('returns same-chain route (single trivial hop) when source == destination', () => {
+    const route = resolveRoute('KSM', 'kah', 'kah')
+    expect(route).not.toBeNull()
+    expect(route?.hops).toEqual([{ from: 'kah', to: 'kah' }])
+  })
+
+  it('returns null when source chain does not carry the token', () => {
+    expect(resolveRoute('USDC', 'encointer', 'encointer')).toBeNull()
   })
 
   it('returns null for USDC involving Encointer', () => {
@@ -84,30 +90,32 @@ describe('resolveRoute', () => {
 })
 
 describe('getDestinations', () => {
-  it('KSM from Encointer -> KAH, PAH', () => {
-    expect(getDestinations('KSM', 'encointer')).toEqual(['kah', 'pah'])
+  // getDestinations now includes the source chain itself (same-chain transfer
+  // to a custom recipient), as well as all cross-chain destinations.
+  it('KSM from Encointer -> Encointer, KAH, PAH', () => {
+    expect(getDestinations('KSM', 'encointer')).toEqual(['encointer', 'kah', 'pah'])
   })
 
-  it('KSM from KAH -> Encointer, PAH', () => {
-    expect(getDestinations('KSM', 'kah')).toEqual(['encointer', 'pah'])
+  it('KSM from KAH -> Encointer, KAH, PAH', () => {
+    expect(getDestinations('KSM', 'kah')).toEqual(['encointer', 'kah', 'pah'])
   })
 
-  it('KSM from PAH -> KAH, Encointer', () => {
+  it('KSM from PAH includes self + KAH + Encointer', () => {
     const dests = getDestinations('KSM', 'pah')
     expect(dests).toContain('kah')
     expect(dests).toContain('encointer')
-    expect(dests).toHaveLength(2)
+    expect(dests).toContain('pah')
   })
 
-  it('USDC from KAH -> PAH only', () => {
-    expect(getDestinations('USDC', 'kah')).toEqual(['pah'])
+  it('USDC from KAH -> KAH, PAH', () => {
+    expect(getDestinations('USDC', 'kah')).toEqual(['kah', 'pah'])
   })
 
-  it('USDC from PAH -> KAH only', () => {
-    expect(getDestinations('USDC', 'pah')).toEqual(['kah'])
+  it('USDC from PAH -> KAH, PAH', () => {
+    expect(getDestinations('USDC', 'pah')).toEqual(['kah', 'pah'])
   })
 
-  it('USDC from Encointer -> empty', () => {
+  it('USDC from Encointer -> empty (encointer has no USDC)', () => {
     expect(getDestinations('USDC', 'encointer')).toEqual([])
   })
 })

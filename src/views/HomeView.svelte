@@ -5,6 +5,7 @@
   import { getBalances, getBalanceFor, isLoading as balancesLoading } from '../lib/balances.svelte'
   import { getDestinations, detectSource } from '../lib/routing'
   import { formatBalance, parseAmount } from '../lib/format'
+  import { getSs58AddressInfo } from 'polkadot-api'
   import TokenSelector from '../components/TokenSelector.svelte'
   import DestinationSelector from '../components/DestinationSelector.svelte'
   import AmountInput from '../components/AmountInput.svelte'
@@ -18,6 +19,8 @@
   let source = $state<ChainId | null>(null)
   let destination = $state<ChainId | null>(null)
   let amountStr = $state('')
+  /** Recipient address. Only used (and shown) when destination === source. */
+  let recipientStr = $state('')
 
   const wallet = $derived(getWalletState())
   const balances = $derived(getBalances())
@@ -31,26 +34,40 @@
     }
   })
 
-  // Reset destination when token or source changes
+  // Default the destination to the first cross-chain option (preserves the
+  // long-standing UX); same-chain (== source) is also selectable but never
+  // auto-picked.
   $effect(() => {
     if (source) {
       const dests = getDestinations(selectedToken, source)
+      const firstCrossChain = dests.find(d => d !== source) ?? dests[0]
       if (destination && !dests.includes(destination)) {
-        destination = dests[0] ?? null
-      } else if (!destination && dests.length > 0) {
-        destination = dests[0]
+        destination = firstCrossChain ?? null
+      } else if (!destination) {
+        destination = firstCrossChain ?? null
       }
     }
   })
 
   const effectiveSource = $derived(source ?? 'encointer')
+  const sameChain = $derived(!!source && destination === source)
+
+  const recipientValidity = $derived.by(() => {
+    if (!recipientStr) return { ok: false, reason: 'empty' as const }
+    const info = getSs58AddressInfo(recipientStr.trim())
+    return info.isValid
+      ? { ok: true as const }
+      : { ok: false, reason: 'invalid' as const }
+  })
 
   const canSubmit = $derived.by(() => {
     if (!wallet.connected || !wallet.address) return false
     if (!source || !destination) return false
     const decimals = getDecimals(effectiveSource, selectedToken)
     const amount = parseAmount(amountStr, decimals)
-    return amount !== null && amount > 0n
+    if (amount === null || amount <= 0n) return false
+    if (sameChain && !recipientValidity.ok) return false
+    return true
   })
 
   function handleSubmit() {
@@ -58,7 +75,8 @@
     const decimals = getDecimals(effectiveSource, selectedToken)
     const amount = parseAmount(amountStr, decimals)
     if (!amount) return
-    onTransfer({ token: selectedToken, source, destination, amount })
+    const recipient = sameChain ? recipientStr.trim() : (wallet.address ?? '')
+    onTransfer({ token: selectedToken, source, destination, amount, recipient })
   }
 
   function handleTokenChange(token: TokenSymbol) {
@@ -143,6 +161,26 @@
           onchange={(d) => destination = d}
         />
       </div>
+
+      {#if sameChain}
+        <div class="form-row">
+          <!-- svelte-ignore a11y_label_has_associated_control -->
+          <label>Recipient</label>
+          <input
+            type="text"
+            class="recipient-input"
+            placeholder="SS58 address on {source ? CHAINS[source].name : ''}"
+            value={recipientStr}
+            oninput={(e) => recipientStr = (e.target as HTMLInputElement).value}
+          />
+        </div>
+        {#if recipientStr && !recipientValidity.ok}
+          <div class="form-row sub">
+            <span class="form-label"></span>
+            <span class="address-error">⚠ Invalid SS58 address (checksum mismatch)</span>
+          </div>
+        {/if}
+      {/if}
 
       <div class="form-row">
         <!-- svelte-ignore a11y_label_has_associated_control -->
@@ -267,6 +305,20 @@
   .submit-btn {
     width: 100%;
     margin-top: 0.5rem;
+  }
+
+  .form-row.sub { margin-top: -0.4rem; }
+
+  .recipient-input {
+    flex: 1;
+    min-width: 0;
+    font-family: var(--font-mono);
+    font-size: 0.85rem;
+  }
+
+  .address-error {
+    font-size: 0.78rem;
+    color: var(--color-danger, #b13030);
   }
 
   .loading-indicator {

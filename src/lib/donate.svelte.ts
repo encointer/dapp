@@ -1,8 +1,8 @@
-import { Builder } from '@paraspell/sdk'
+import { Builder, getExistentialDeposit } from '@paraspell/sdk'
 import { AccountId, Binary, getSs58AddressInfo } from 'polkadot-api'
 import type { PolkadotSigner } from 'polkadot-api'
 import type { ChainId, TokenSymbol } from './types'
-import { toParaSpell, getCurrency } from './chains'
+import { CHAINS, toParaSpell, getCurrency } from './chains'
 import { getApiOverrides, getClient } from './provider.svelte'
 import type { Faucet, Treasury } from './recipients.svelte'
 import { quoteUsdcForExactNative } from './forex'
@@ -540,6 +540,15 @@ export async function estimateDonate(
 export function sourceFeeAsset(source: ChainId): { symbol: string; decimals: number } {
   if (source === 'pah') return { symbol: 'DOT', decimals: 10 }
   return { symbol: 'KSM', decimals: 12 }
+}
+
+/** Existential deposit of the chain's native fee asset. */
+function nativeED(source: ChainId): bigint {
+  const nativeSymbol: TokenSymbol = source === 'pah' ? 'DOT' : 'KSM'
+  try {
+    const v = getExistentialDeposit(CHAINS[source].paraSpellName, getCurrency(source, nativeSymbol))
+    return v ?? 0n
+  } catch { return 0n }
 }
 
 // Asset-hub bridge-delivery fees are paid in NATIVE (DOT on PAH, KSM on KAH)
@@ -1127,6 +1136,16 @@ function extractSourceNativeDelta(sender: string, events: unknown[]): bigint {
     const amt = asBigInt(evField(ev, 'amount'))
     if (amt != null && ss58Eq(who, sender)) delta += amt
   }
+  // pallet_balances::transfer_keep_alive emits a single `Transfer` event
+  // (no separate Withdraw + Deposit), so we need to count that too.
+  for (const ev of findEvents(events, 'Balances', 'Transfer')) {
+    const from = evField<string>(ev, 'from')
+    const to = evField<string>(ev, 'to')
+    const amt = asBigInt(evField(ev, 'amount'))
+    if (amt == null) continue
+    if (ss58Eq(from, sender)) delta -= amt
+    if (ss58Eq(to, sender)) delta += amt
+  }
   return delta
 }
 
@@ -1135,22 +1154,41 @@ function extractRecipientReceipts(
   recipients: DonateRecipient[],
   events: unknown[],
 ): RecipientReceipt[] {
-  const palletKey = destChain === 'kah' ? 'ForeignAssets' : 'Assets'
   const sums = new Map<string, bigint>(recipients.map(r => [r.address, 0n]))
-  // pallet-assets / pallet-foreign-assets emit `Deposited { asset_id, who, amount }`
-  // when XCM `DepositAsset` mints to a beneficiary. Older variants used `Issued`.
-  const eventStreams = [
-    ...findEvents(events, palletKey, 'Deposited'),
-    ...findEvents(events, palletKey, 'Issued'),
-  ]
-  for (const ev of eventStreams) {
-    const who = evField<string>(ev, 'who', 'owner')
-    const amt = asBigInt(evField(ev, 'amount', 'balance'))
-    if (!who || amt == null) continue
-    for (const r of recipients) {
-      if (ss58Eq(who, r.address)) sums.set(r.address, (sums.get(r.address) ?? 0n) + amt)
+  // Token-asset events (Deposited / Issued / Transferred) for both pallets —
+  // covers same-chain transfers via Assets/ForeignAssets and XCM-mediated
+  // mints into recipient accounts.
+  for (const palletKey of ['ForeignAssets', 'Assets'] as const) {
+    for (const ev of findEvents(events, palletKey, 'Deposited').concat(findEvents(events, palletKey, 'Issued'))) {
+      const who = evField<string>(ev, 'who', 'owner')
+      const amt = asBigInt(evField(ev, 'amount', 'balance'))
+      if (!who || amt == null) continue
+      for (const r of recipients) {
+        if (ss58Eq(who, r.address)) sums.set(r.address, (sums.get(r.address) ?? 0n) + amt)
+      }
+    }
+    for (const ev of findEvents(events, palletKey, 'Transferred')) {
+      const to = evField<string>(ev, 'to')
+      const amt = asBigInt(evField(ev, 'amount', 'balance'))
+      if (!to || amt == null) continue
+      for (const r of recipients) {
+        if (ss58Eq(to, r.address)) sums.set(r.address, (sums.get(r.address) ?? 0n) + amt)
+      }
     }
   }
+  // Native-token transfers via pallet_balances (Balances.Transfer { from, to, amount }).
+  for (const ev of findEvents(events, 'Balances', 'Transfer')) {
+    const to = evField<string>(ev, 'to')
+    const amt = asBigInt(evField(ev, 'amount'))
+    if (!to || amt == null) continue
+    for (const r of recipients) {
+      if (ss58Eq(to, r.address)) sums.set(r.address, (sums.get(r.address) ?? 0n) + amt)
+    }
+  }
+  // destChain is unused here — we filter by recipient address; pallets are
+  // tried in turn so the same helper covers PAH local Assets, KAH/PAH foreign
+  // assets, and native (DOT/KSM) Balances transfers.
+  void destChain
   return recipients.map(r => ({ address: r.address, label: r.label, received: sums.get(r.address) ?? 0n }))
 }
 
@@ -1233,7 +1271,9 @@ export async function dryRunFull(
     const sourceNativeFinal = currentNative !== null ? currentNative + sourceNativeDelta : null
     const recipientReceipts = destChainCovered
       ? extractRecipientReceipts(destChainCovered, recipients, destEvents)
-      : recipients.map(r => ({ address: r.address, label: r.label, received: 0n }))
+      // No remote destination — same-chain transfer. Read receipts from the
+      // source-side events (Balances.Transfer / Assets.Transferred etc.).
+      : extractRecipientReceipts(source, recipients, src.events)
     summary.balance = { sourceUsdcDelta, sourceNativeDelta, sourceNativeFinal, recipientReceipts }
     console.log('[dry-run] balance impact:', {
       sourceUsdcDelta: sourceUsdcDelta.toString(),
@@ -1307,14 +1347,19 @@ export async function decideFeeStrategy(
     console.warn(`${tag} native fee estimate failed; will try asset-conversion path`, err)
   }
 
-  // Step 2: enough native?
+  // Step 2: enough native to cover fee AND remain ≥ ED?
+  // ChargeAssetTxPayment uses ExistenceRequirement::KeepAlive, which fails
+  // if `native - fee < ED`. PAH/KAH accounts can hold native below ED via
+  // asset-sufficiency (e.g. USDC), so checking only `native >= fee` lets
+  // dry-run-success but submit-Invalid::Payment slip through.
   const native = await fetchNativeBalance(source, senderAddress)
-  console.log(`${tag} sender native balance = ${native ?? 'unknown'} planck${native != null ? ` (${fmtNative(native)})` : ''}`)
-  if (fee !== null && native !== null && native >= fee) {
-    console.log(`${tag} → native path chosen (balance covers fee, surplus = ${fmtNative(native - fee)})`)
+  const ed = nativeED(source)
+  console.log(`${tag} sender native balance = ${native ?? 'unknown'} planck${native != null ? ` (${fmtNative(native)})` : ''}; ED = ${ed} planck (${fmtNative(ed)})`)
+  if (fee !== null && native !== null && native >= fee + ed) {
+    console.log(`${tag} → native path chosen (balance covers fee + ED, surplus = ${fmtNative(native - fee - ed)})`)
     return { txOpts, nativeFee: fee }
   }
-  console.log(`${tag} native insufficient${fee !== null && native !== null ? ` (short by ${fmtNative(fee - native)})` : ''}; trying asset path`)
+  console.log(`${tag} native insufficient for KeepAlive${fee !== null && native !== null ? ` (need ${fmtNative(fee + ed)}, have ${fmtNative(native)})` : ''}; trying asset path`)
 
   // Step 3: asset path (USDC on PAH/KAH for token=USDC).
   const asset = feeAssetFor(source, token)

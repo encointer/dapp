@@ -36,6 +36,10 @@ export interface TransferParams {
   source: ChainId
   destination: ChainId
   amount: bigint
+  /** Recipient SS58 address. For cross-chain transfers we default to the
+   *  sender's own address; for same-chain transfers the user supplies a
+   *  recipient (which may differ from the sender). */
+  recipient: string
 }
 
 export type HopStatus = 'pending' | 'signing' | 'submitted' | 'success' | 'error'
@@ -44,6 +48,7 @@ export interface HopProgress {
   hop: Hop
   status: HopStatus
   error?: string
+  txHash?: string
 }
 
 export type TransferState =
@@ -51,7 +56,7 @@ export type TransferState =
   | { step: 'estimating' }
   | { step: 'ready'; fees: HopFee[]; hopDryRuns?: import('./donate.svelte').DryRunSummary[] }
   | { step: 'executing'; hops: HopProgress[] }
-  | { step: 'success' }
+  | { step: 'success'; hops: HopProgress[] }
   | { step: 'error'; message: string }
 
 export interface FeeDetail {

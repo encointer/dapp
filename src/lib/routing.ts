@@ -38,7 +38,12 @@ const ROUTE_TABLE = new Map<string, Hop[]>([
 ])
 
 export function resolveRoute(token: TokenSymbol, from: ChainId, to: ChainId): Route | null {
-  if (from === to) return null
+  if (!chainHasToken(from, token)) return null
+  if (from === to) {
+    // Same-chain transfer: a single trivial "hop" so the transfer flow's
+    // per-hop pipeline (build / dry-run / submit) still applies.
+    return { token, hops: [{ from, to }] }
+  }
   const hops = ROUTE_TABLE.get(key({ token, from, to }))
   if (!hops) return null
   return { token, hops }
@@ -46,9 +51,9 @@ export function resolveRoute(token: TokenSymbol, from: ChainId, to: ChainId): Ro
 
 export function getDestinations(token: TokenSymbol, source: ChainId): ChainId[] {
   return CHAIN_IDS.filter(id => {
-    if (id === source) return false
     if (!chainHasToken(id, token)) return false
     if (!chainHasToken(source, token)) return false
+    if (id === source) return true // same-chain (in-chain transfer to a custom recipient)
     return resolveRoute(token, source, id) !== null
   })
 }

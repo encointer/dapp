@@ -1,8 +1,9 @@
 <script lang="ts">
   import type { TransferParams, HopFee } from '../lib/types'
   import { CHAINS, getDecimals } from '../lib/chains'
-  import { formatBalance } from '../lib/format'
+  import { formatBalance, truncateAddress } from '../lib/format'
   import { getWalletState } from '../lib/wallet.svelte'
+  import { getSs58AddressInfo } from 'polkadot-api'
   import {
     estimateFees,
     executeTransfer,
@@ -14,6 +15,7 @@
   import RouteDisplay from '../components/RouteDisplay.svelte'
   import FeeBreakdown from '../components/FeeBreakdown.svelte'
   import TransferProgress from '../components/TransferProgress.svelte'
+  import { subscanUrl } from '../lib/donate.svelte'
 
   interface Props {
     params: TransferParams
@@ -34,6 +36,20 @@
       (h.from === 'kah' && h.to === 'pah') || (h.from === 'pah' && h.to === 'kah'),
     )
   })
+
+  function pubKeyHex(addr: string | null): string | null {
+    if (!addr) return null
+    const info = getSs58AddressInfo(addr)
+    return info.isValid
+      ? Array.from(info.publicKey).map(b => b.toString(16).padStart(2, '0')).join('')
+      : null
+  }
+  const isSelfTransfer = $derived.by(() => {
+    const a = pubKeyHex(wallet.address)
+    const b = pubKeyHex(params.recipient)
+    return !!a && !!b && a === b
+  })
+  const isSameChain = $derived(params.source === params.destination)
 
   let fees = $state(null as HopFee[] | null)
 
@@ -68,11 +84,34 @@
 <div class="transfer">
   <button class="btn btn-ghost back-btn" onclick={handleBack}>&larr; Back</button>
 
-  <h2>Transfer {displayAmount} {params.token}</h2>
+  <h2>
+    {#if isSameChain}
+      {isSelfTransfer ? 'Move' : 'Send'} {displayAmount} {params.token}
+    {:else}
+      Transfer {displayAmount} {params.token}
+    {/if}
+  </h2>
 
-  {#if route}
+  {#if route && !isSameChain}
     <RouteDisplay {route} />
   {/if}
+
+  <div class="card transfer-meta">
+    <div><span class="dim-text">From:</span> {CHAINS[params.source].name}</div>
+    {#if !isSameChain}
+      <div><span class="dim-text">To:</span> {CHAINS[params.destination].name}</div>
+    {/if}
+    <div>
+      <span class="dim-text">Recipient:</span>
+      {#if isSelfTransfer}
+        <span>your account</span>
+        <span class="dim-text">({truncateAddress(params.recipient)})</span>
+      {:else}
+        <span class="addr">{truncateAddress(params.recipient)}</span>
+        <span class="dim-text">on {CHAINS[params.destination].name}</span>
+      {/if}
+    </div>
+  </div>
 
   {#if txState.step === 'estimating'}
     <div class="card status-card">
@@ -82,7 +121,7 @@
   {/if}
 
   {#if txState.step === 'ready' && fees}
-    <FeeBreakdown {fees} {params} />
+    <FeeBreakdown {fees} {params} senderAddress={wallet.address} />
 
     {#if txState.hopDryRuns}
       {#each txState.hopDryRuns as dr, i}
@@ -123,9 +162,10 @@
                 {/if}
               </li>
               {#if bal.recipientReceipts.length > 0 && bal.recipientReceipts[0].received > 0n}
+                {@const tokenDecimals = getDecimals(hop?.to ?? params.destination, params.token)}
                 <li>
-                  <span class="dim-text">Arrives at destination:</span>
-                  <span class="mono">{formatBalance(bal.recipientReceipts[0].received, 6)} {params.token === 'USDC' ? 'USDC' : params.token}</span>
+                  <span class="dim-text">{isSelfTransfer ? 'You receive:' : 'Recipient receives:'}</span>
+                  <span class="mono">{formatBalance(bal.recipientReceipts[0].received, tokenDecimals)} {params.token}</span>
                 </li>
               {/if}
             </ul>
@@ -148,6 +188,18 @@
   {#if txState.step === 'success'}
     <div class="card success-card">
       <p class="success-text">Submitted on source chain!</p>
+      <ul class="tx-links">
+        {#each txState.hops as h}
+          {@const link = h.txHash ? subscanUrl(h.hop.from, h.txHash) : null}
+          {#if link}
+            <li>
+              <a href={link} target="_blank" rel="noopener" class="subscan-link">
+                {CHAINS[h.hop.from].name}: view on Subscan ↗
+              </a>
+            </li>
+          {/if}
+        {/each}
+      </ul>
       {#if isBridgeTransfer}
         <p class="bridge-note">Funds are being bridged and will arrive at the destination in ~6 minutes.</p>
       {/if}
@@ -183,6 +235,16 @@
     font-weight: 600;
   }
 
+  .transfer-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    font-size: 0.9rem;
+  }
+  .transfer-meta .addr {
+    font-family: var(--font-mono);
+  }
+
   .status-card {
     text-align: center;
     padding: 1.5rem;
@@ -214,6 +276,23 @@
   .bridge-note {
     font-size: 0.9rem;
     color: var(--color-warning);
+  }
+
+  .tx-links {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    font-size: 0.85rem;
+  }
+  .subscan-link {
+    color: var(--color-accent);
+    text-decoration: underline;
+  }
+  .subscan-link:hover {
+    color: var(--color-accent-strong, var(--color-accent));
   }
 
   .error-card {

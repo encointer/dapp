@@ -22,7 +22,9 @@
 <select value={value ?? ''} onchange={handleChange}>
   <option value="" disabled>Select destination</option>
   {#each destinations as dest}
-    <option value={dest}>{getChain(dest).name}</option>
+    <option value={dest}>
+      {getChain(dest).name}{dest === source ? ' (same-chain)' : ''}
+    </option>
   {/each}
 </select>
 
