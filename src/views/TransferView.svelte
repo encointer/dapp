@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { TransferParams, HopFee } from '../lib/types'
-  import { getDecimals } from '../lib/chains'
+  import { CHAINS, getDecimals } from '../lib/chains'
   import { formatBalance } from '../lib/format'
   import { getWalletState } from '../lib/wallet.svelte'
   import {
@@ -83,6 +83,56 @@
 
   {#if txState.step === 'ready' && fees}
     <FeeBreakdown {fees} {params} />
+
+    {#if txState.hopDryRuns}
+      {#each txState.hopDryRuns as dr, i}
+        {@const hop = route?.hops[i]}
+        <div class="hop-summary card">
+          <div class="hop-title">
+            {hop ? `${CHAINS[hop.from].name} → ${CHAINS[hop.to].name}` : `Hop ${i + 1}`}
+          </div>
+          <ul class="dry-run-summary">
+            <li class:ok={dr.sourceOk}>
+              {dr.sourceOk ? '✓' : '✗'} source: {dr.sourceOk ? 'dispatch would succeed' : (dr.sourceMessage ?? 'failed')}
+            </li>
+            {#each dr.destinations as d}
+              <li class:ok={d.ok}>
+                {d.ok ? '✓' : '✗'} destination ({CHAINS[d.destChain].name}): {d.ok ? 'XCM would execute Complete' : (d.errorMessage ?? 'failed')}
+              </li>
+            {/each}
+          </ul>
+          {#if dr.balance}
+            {@const bal = dr.balance}
+            {@const usdcOut = bal.sourceUsdcDelta < 0n ? -bal.sourceUsdcDelta : 0n}
+            {@const nativeDecimals = hop?.from === 'pah' ? 10 : 12}
+            {@const nativeSymbol = hop?.from === 'pah' ? 'DOT' : 'KSM'}
+            {@const nativeAbs = bal.sourceNativeDelta < 0n ? -bal.sourceNativeDelta : bal.sourceNativeDelta}
+            {@const nativeSign = bal.sourceNativeDelta < 0n ? '−' : '+'}
+            <ul class="net-effect">
+              {#if usdcOut > 0n}
+                <li>
+                  <span class="dim-text">USDC charged from your account:</span>
+                  <span class="mono">{formatBalance(usdcOut, 6)} USDC</span>
+                </li>
+              {/if}
+              <li>
+                <span class="dim-text">{nativeSymbol} change:</span>
+                <span class="mono">{nativeSign}{formatBalance(nativeAbs, nativeDecimals)} {nativeSymbol}</span>
+                {#if bal.sourceNativeFinal !== null}
+                  <span class="dim-text">→ remaining {formatBalance(bal.sourceNativeFinal < 0n ? 0n : bal.sourceNativeFinal, nativeDecimals)} {nativeSymbol}</span>
+                {/if}
+              </li>
+              {#if bal.recipientReceipts.length > 0 && bal.recipientReceipts[0].received > 0n}
+                <li>
+                  <span class="dim-text">Arrives at destination:</span>
+                  <span class="mono">{formatBalance(bal.recipientReceipts[0].received, 6)} {params.token === 'USDC' ? 'USDC' : params.token}</span>
+                </li>
+              {/if}
+            </ul>
+          {/if}
+        </div>
+      {/each}
+    {/if}
 
     <button class="btn btn-primary confirm-btn" onclick={handleConfirm}>
       Confirm Transfer
@@ -180,4 +230,40 @@
   .error-actions .btn {
     flex: 1;
   }
+
+  .hop-summary {
+    padding: 0.75rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+  }
+  .hop-title {
+    font-weight: 600;
+    font-size: 0.9rem;
+  }
+  .dry-run-summary, .net-effect {
+    list-style: none;
+    padding: 0.4rem 0.6rem;
+    margin: 0;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    background: var(--color-surface-hover);
+    font-size: 0.8rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+  }
+  .dry-run-summary li {
+    color: var(--color-danger, #b13030);
+  }
+  .dry-run-summary li.ok {
+    color: var(--color-success, #058257);
+  }
+  .net-effect li {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    align-items: baseline;
+  }
+  .mono { font-family: var(--font-mono); }
 </style>

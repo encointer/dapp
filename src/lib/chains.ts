@@ -22,6 +22,8 @@ export const CHAINS: Record<ChainId, ChainConfig> = {
     ],
     tokens: [
       { symbol: 'KSM', decimals: 12, currency: { symbol: Native('KSM') } },
+      // DOT bridged from PAH — KAH's foreign asset for the Polkadot relay token.
+      { symbol: 'DOT', decimals: 10, currency: { symbol: Foreign('DOT') } },
       {
         symbol: 'USDC',
         decimals: 6,
@@ -51,13 +53,14 @@ export const CHAINS: Record<ChainId, ChainConfig> = {
     ],
     tokens: [
       { symbol: 'KSM', decimals: 12, currency: { symbol: Foreign('KSM') } },
+      { symbol: 'DOT', decimals: 10, currency: { symbol: Native('DOT') } },
       { symbol: 'USDC', decimals: 6, currency: { id: 1337 } },
     ],
   },
 }
 
 export const CHAIN_IDS: ChainId[] = ['encointer', 'kah', 'pah']
-export const TOKEN_SYMBOLS: TokenSymbol[] = ['KSM', 'USDC']
+export const TOKEN_SYMBOLS: TokenSymbol[] = ['KSM', 'DOT', 'USDC']
 
 export function getChain(id: ChainId): ChainConfig {
   return CHAINS[id]

@@ -2,7 +2,7 @@ import type { PolkadotSigner } from 'polkadot-api'
 import type { TCurrencyCore } from '@paraspell/sdk'
 
 export type ChainId = 'encointer' | 'kah' | 'pah'
-export type TokenSymbol = 'KSM' | 'USDC'
+export type TokenSymbol = 'KSM' | 'USDC' | 'DOT'
 export type ProviderMode = 'smoldot' | 'rpc'
 
 export type ParaSpellChain = 'Encointer' | 'AssetHubKusama' | 'AssetHubPolkadot'
@@ -49,7 +49,7 @@ export interface HopProgress {
 export type TransferState =
   | { step: 'idle' }
   | { step: 'estimating' }
-  | { step: 'ready'; fees: HopFee[] }
+  | { step: 'ready'; fees: HopFee[]; hopDryRuns?: import('./donate.svelte').DryRunSummary[] }
   | { step: 'executing'; hops: HopProgress[] }
   | { step: 'success' }
   | { step: 'error'; message: string }

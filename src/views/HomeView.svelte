@@ -2,10 +2,9 @@
   import type { ChainId, TokenSymbol, TransferParams } from '../lib/types'
   import { CHAINS, CHAIN_IDS, chainHasToken, getDecimals } from '../lib/chains'
   import { getWalletState } from '../lib/wallet.svelte'
-  import { getBalances, isLoading as balancesLoading } from '../lib/balances.svelte'
+  import { getBalances, getBalanceFor, isLoading as balancesLoading } from '../lib/balances.svelte'
   import { getDestinations, detectSource } from '../lib/routing'
-  import { parseAmount } from '../lib/format'
-  import BalanceCard from '../components/BalanceCard.svelte'
+  import { formatBalance, parseAmount } from '../lib/format'
   import TokenSelector from '../components/TokenSelector.svelte'
   import DestinationSelector from '../components/DestinationSelector.svelte'
   import AmountInput from '../components/AmountInput.svelte'
@@ -72,15 +71,9 @@
     source = chainId
   }
 
-  // Group chains by token for balance display
-  const tokenGroups = $derived.by(() => {
-    const groups: { token: TokenSymbol; chains: ChainId[] }[] = []
-    for (const token of ['KSM', 'USDC'] as TokenSymbol[]) {
-      const chains = CHAIN_IDS.filter(id => chainHasToken(id, token))
-      groups.push({ token, chains })
-    }
-    return groups
-  })
+  // Tokens displayed as grid columns; chains as rows.
+  const gridTokens: TokenSymbol[] = ['KSM', 'DOT', 'USDC']
+  const gridChains = CHAIN_IDS
 </script>
 
 <div class="home">
@@ -97,22 +90,31 @@
         {/if}
       </div>
 
-      {#each tokenGroups as group}
-        <div class="token-group card">
-          <h3 class="token-heading">{group.token}</h3>
-          {#each group.chains as chainId}
-            <BalanceCard
-              {chainId}
-              token={group.token}
-              selected={selectedToken === group.token && source === chainId}
-              onclick={() => {
-                selectedToken = group.token
-                handleSourceSelect(chainId)
-              }}
-            />
+      <div class="balances-grid card">
+        <div class="grid-cell corner"></div>
+        {#each gridTokens as token}
+          <div class="grid-cell token-header">{token}</div>
+        {/each}
+        {#each gridChains as chainId}
+          <div class="grid-cell chain-header">{CHAINS[chainId].name}</div>
+          {#each gridTokens as token}
+            {#if chainHasToken(chainId, token)}
+              {@const entry = getBalanceFor(chainId, token)}
+              {@const dec = getDecimals(chainId, token)}
+              <button
+                class="grid-cell balance-cell"
+                class:selected={selectedToken === token && source === chainId}
+                onclick={() => { selectedToken = token; handleSourceSelect(chainId) }}
+                type="button"
+              >
+                {entry ? formatBalance(entry.transferable, dec) : '—'}
+              </button>
+            {:else}
+              <div class="grid-cell empty dim-text">—</div>
+            {/if}
           {/each}
-        </div>
-      {/each}
+        {/each}
+      </div>
     </section>
 
     <section class="send-section card">
@@ -190,19 +192,54 @@
     font-weight: 600;
   }
 
-  .token-group {
-    display: flex;
-    flex-direction: column;
+  .balances-grid {
+    display: grid;
+    grid-template-columns: minmax(8rem, auto) repeat(3, 1fr);
     gap: 0.25rem;
+    padding: 0.5rem 0.6rem;
   }
-
-  .token-heading {
+  .grid-cell {
+    padding: 0.45rem 0.55rem;
+    border-radius: var(--radius);
+    border: 1px solid transparent;
     font-size: 0.85rem;
+    font-family: var(--font-mono);
+    text-align: right;
+  }
+  .grid-cell.corner {
+    visibility: hidden;
+  }
+  .grid-cell.token-header {
+    text-align: right;
+    font-family: inherit;
     font-weight: 600;
     color: var(--color-text-dim);
     text-transform: uppercase;
-    letter-spacing: 0.05em;
-    margin-bottom: 0.25rem;
+    letter-spacing: 0.04em;
+    font-size: 0.78rem;
+  }
+  .grid-cell.chain-header {
+    text-align: left;
+    font-family: inherit;
+    font-weight: 600;
+    color: var(--color-text);
+    font-size: 0.85rem;
+  }
+  .grid-cell.balance-cell {
+    background: transparent;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s;
+  }
+  .grid-cell.balance-cell:hover {
+    background: var(--color-surface-hover);
+  }
+  .grid-cell.balance-cell.selected {
+    border-color: var(--color-accent);
+    background: var(--color-surface-hover);
+  }
+  .grid-cell.empty {
+    text-align: right;
+    cursor: default;
   }
 
   .send-section {

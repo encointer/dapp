@@ -4,6 +4,10 @@ import type { TransferParams, TransferState, HopFee, HopProgress, Route, FeeDeta
 import { resolveRoute } from './routing'
 import { toParaSpell, getCurrency } from './chains'
 import { getApiOverrides, getClient } from './provider.svelte'
+import {
+  decideFeeStrategy, dryRunFull, maybeWrapWithFeeSwap,
+  type SrcApi, type UnsignedTx, type DryRunSummary, type PapiTxOptions,
+} from './donate.svelte'
 
 // KSM location on KAH (from relay parent)
 const KSM_LOCATION = { parents: 1, interior: 'Here' }
@@ -33,7 +37,9 @@ async function quoteKsmToUsdc(ksmAmount: bigint): Promise<bigint | null> {
   const client = getClient('kah')
   if (!client) return null
   try {
-    const api = client.getUnsafeApi()
+    const api = client.getUnsafeApi() as unknown as {
+      apis: { AssetConversionApi: { quote_price_exact_tokens_for_tokens: (a: unknown, b: unknown, amt: bigint, includeFee: boolean) => Promise<bigint | null | undefined> } }
+    }
     const result = await api.apis.AssetConversionApi.quote_price_exact_tokens_for_tokens(
       KSM_LOCATION, USDC_KAH_LOCATION, ksmAmount, true,
     )
@@ -58,6 +64,38 @@ function extractFee(detail: { fee?: bigint; asset: { symbol?: string; decimals?:
   }
 }
 
+interface BuiltHop {
+  /** Wrapped PAPI tx (paraspell-built tx, optionally batched with a USDC→native fee swap). */
+  tx: UnsignedTx
+  /** Per-hop fee strategy decided from native vs asset-conversion. */
+  txOpts: PapiTxOptions | undefined
+}
+
+async function buildHopTx(
+  hop: { from: import('./types').ChainId; to: import('./types').ChainId },
+  token: import('./types').TokenSymbol,
+  amount: bigint,
+  senderAddress: string,
+): Promise<BuiltHop> {
+  const overrides = getApiOverrides()
+  if (!overrides) throw new Error('Not connected to chains')
+  const currency = { ...getCurrency(hop.from, token), amount: amount.toString() }
+  const psTx = await Builder({ apiOverrides: overrides })
+    .from(toParaSpell(hop.from))
+    .to(toParaSpell(hop.to))
+    .currency(currency)
+    .address(senderAddress)
+    .senderAddress(senderAddress)
+    .build()
+
+  const srcClient = getClient(hop.from)
+  if (!srcClient) throw new Error(`No client for ${hop.from}`)
+  const srcApi = srcClient.getUnsafeApi() as unknown as SrcApi
+  const tx = await maybeWrapWithFeeSwap(srcApi, hop.from, token, psTx as unknown as UnsignedTx, senderAddress)
+  const strategy = await decideFeeStrategy(hop.from, token, tx, senderAddress)
+  return { tx, txOpts: strategy.txOpts }
+}
+
 export async function estimateFees(
   params: TransferParams,
   senderAddress: string,
@@ -72,8 +110,10 @@ export async function estimateFees(
 
   try {
     const fees: HopFee[] = []
+    const hopDryRuns: DryRunSummary[] = []
 
     for (const hop of route.hops) {
+      // Paraspell's getXcmFee gives a per-asset breakdown for display.
       const currency = { ...getCurrency(hop.from, params.token), amount: params.amount.toString() }
       const feeResult = await builder()
         .from(toParaSpell(hop.from))
@@ -88,9 +128,28 @@ export async function estimateFees(
         enrichWithQuote(extractFee(feeResult.destination)),
       ])
       fees.push({ hop, origin, destination })
+
+      // Dry-run the actual tx (with fee-swap pre-pended if needed) so we can
+      // catch bridge / fee / pool issues before the user signs anything.
+      const built = await buildHopTx(hop, params.token, params.amount, senderAddress)
+      const dr = await dryRunFull(
+        hop.from, built.tx.decodedCall, senderAddress,
+        [{ id: senderAddress, address: senderAddress, label: 'You' }],
+      )
+      hopDryRuns.push(dr)
+
+      if (!dr.sourceOk) {
+        transferState = { step: 'error', message: `${hop.from} → ${hop.to}: ${dr.sourceMessage ?? 'dry-run failed'}` }
+        return null
+      }
+      const failedDest = dr.destinations.find(d => !d.ok)
+      if (failedDest) {
+        transferState = { step: 'error', message: `${hop.from} → ${hop.to} (${failedDest.destChain}): ${failedDest.errorMessage ?? 'failed'}` }
+        return null
+      }
     }
 
-    transferState = { step: 'ready', fees }
+    transferState = { step: 'ready', fees, hopDryRuns }
     return fees
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Fee estimation failed'
@@ -124,14 +183,8 @@ export async function executeTransfer(
     transferState = { step: 'executing', hops: [...hopProgresses] }
 
     try {
-      const currency = { ...getCurrency(hop.from, params.token), amount: params.amount.toString() }
-      await builder()
-        .from(toParaSpell(hop.from))
-        .to(toParaSpell(hop.to))
-        .currency(currency)
-        .address(address)
-        .senderAddress(signer)
-        .signAndSubmit()
+      const built = await buildHopTx(hop, params.token, params.amount, address)
+      await built.tx.signAndSubmit(signer, built.txOpts)
 
       hopProgresses[i] = { ...hopProgresses[i], status: 'success' }
       transferState = { step: 'executing', hops: [...hopProgresses] }

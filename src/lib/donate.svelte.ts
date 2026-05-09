@@ -82,6 +82,8 @@ function destChainFor(token: TokenSymbol): ChainId {
 export const ALLOWED_SOURCES: Record<TokenSymbol, ChainId[]> = {
   KSM: ['encointer', 'kah'],
   USDC: ['kah', 'pah'],
+  // DOT is balance-display only (no in-app routing for donations either).
+  DOT: [],
 }
 
 export function destinationChain(token: TokenSymbol): ChainId {
@@ -120,7 +122,7 @@ export function recipientFromTreasury(t: Treasury): DonateRecipient {
   return { id: t.kahAccount, address: t.kahAccount, label: t.name }
 }
 
-interface SrcApi {
+export interface SrcApi {
   tx: {
     Balances?: { transfer_keep_alive: (args: unknown) => UnsignedTx }
     ForeignAssets?: { transfer_keep_alive: (args: unknown) => UnsignedTx }
@@ -132,11 +134,11 @@ interface SrcApi {
   apis?: Record<string, Record<string, (...args: unknown[]) => Promise<unknown>>>
 }
 
-interface PapiTxOptions {
+export interface PapiTxOptions {
   asset?: unknown
 }
 
-interface UnsignedTx {
+export interface UnsignedTx {
   decodedCall: unknown
   getEstimatedFees: (sender: string, opts?: PapiTxOptions) => Promise<bigint>
   signAndSubmit: (signer: PolkadotSigner, opts?: PapiTxOptions) => Promise<{ txHash: string } | unknown>
@@ -270,7 +272,7 @@ async function buildPerRecipientCalls(
     )
     if (consolidated) {
       console.log('[donate] consolidation produced single tx ✓')
-      const wrapped = await maybeWrapWithDotSwap(srcApi, source, consolidated, senderAddress)
+      const wrapped = await maybeWrapWithFeeSwap(srcApi, source, token, consolidated, senderAddress)
       return [wrapped]
     }
     console.log('[donate] consolidation returned null; using per-recipient batch')
@@ -289,8 +291,8 @@ async function buildPerRecipientCalls(
 
   // Single-tx PAH→KAH USDC paths (e.g. one recipient, paraspell-built) also
   // need DOT for bridge delivery — wrap the lone call too.
-  if (calls.length === 1 && source === 'pah' && token === 'USDC' && dest === 'kah') {
-    const wrapped = await maybeWrapWithDotSwap(srcApi, source, calls[0], senderAddress)
+  if (calls.length === 1 && source !== dest && token === 'USDC') {
+    const wrapped = await maybeWrapWithFeeSwap(srcApi, source, token, calls[0], senderAddress)
     return [wrapped]
   }
   return calls
@@ -535,84 +537,118 @@ export async function estimateDonate(
 /** Returns the source chain's native fee asset. `getEstimatedFees` always
  *  reports the partial-fee in native units regardless of `txOpts.asset`;
  *  the asset_id hint only changes what's swapped IN at submit time. */
-function sourceFeeAsset(source: ChainId): { symbol: string; decimals: number } {
+export function sourceFeeAsset(source: ChainId): { symbol: string; decimals: number } {
   if (source === 'pah') return { symbol: 'DOT', decimals: 10 }
   return { symbol: 'KSM', decimals: 12 }
 }
 
-// PAH bridge-delivery fee is paid in DOT from the user's account by the
-// XcmRouter. Per the runtime constants on PAH (xcm_config + bp_bridge_hub_*):
-//   HRMP PAH → BridgeHubPolkadot   ≈ 0.03 DOT (`ToSiblingBaseDeliveryFee`)
-//   bridge processing + confirmation ≈ 0.007 DOT (`estimate_polkadot_to_kusama_message_fee`)
-//   per-byte fees                  ≈ 0.005 DOT (varies with msg size)
-// → ≈ 0.04 DOT total. We top up to 0.1 DOT to leave a comfortable buffer
-// (covers a few donations) and the user keeps the leftover for next time.
+// Asset-hub bridge-delivery fees are paid in NATIVE (DOT on PAH, KSM on KAH)
+// from the user's account by the XcmRouter and aren't swappable from foreign
+// assets by the runtime. We work around that by prepending a USDC→native
+// `swap_tokens_for_exact_tokens` call to top up the user's native balance.
 //
-// The swap is `swap_tokens_for_exact_tokens` so only the USDC needed to
-// produce `DOT_TOPUP_AMOUNT` is consumed; the rest of USDC stays untouched.
-const PAH_DOT_BRIDGE_THRESHOLD = 500_000_000n   // 0.05 DOT (10 dec) — skip swap if user has ≥ this
-const PAH_DOT_TOPUP_AMOUNT     = 1_000_000_000n // 0.1  DOT — swap target
-const PAH_USDC_SWAP_MAX        = 5_000_000n     // 5 USDC max input (slippage protection)
-
-const USDC_PAH_LOCAL_LOC = {
-  parents: 0,
-  interior: {
-    type: 'X2',
-    value: [
-      { type: 'PalletInstance', value: 50 },
-      { type: 'GeneralIndex', value: 1337n },
-    ],
+// Per the runtime constants:
+//   * PAH→BridgeHubPolkadot HRMP   ≈ 0.03 DOT (`ToSiblingBaseDeliveryFee`)
+//   * Polkadot↔Kusama bridge       ≈ 0.007 DOT (incl. confirmation)
+//   → topup target 0.1 DOT, threshold 0.05 DOT.
+//   * KAH→BridgeHubKusama HRMP     ≈ 0.03 KSM (`ToSiblingBaseDeliveryFee`)
+//   * Kusama↔Polkadot bridge       ≈ similar magnitude
+//   → topup target 0.05 KSM, threshold 0.025 KSM.
+const SWAP_CONFIG: Partial<Record<ChainId, {
+  threshold: bigint
+  topup: bigint
+  usdcMax: bigint
+  nativeLoc: { parents: number; interior: { type: string; value: undefined } }
+  usdcLoc: unknown
+}>> = {
+  pah: {
+    threshold: 500_000_000n,   // 0.05 DOT (10 dec)
+    topup: 1_000_000_000n,     // 0.1 DOT
+    usdcMax: 5_000_000n,       // 5 USDC
+    nativeLoc: { parents: 1, interior: { type: 'Here', value: undefined } },
+    usdcLoc: {
+      parents: 0,
+      interior: {
+        type: 'X2',
+        value: [
+          { type: 'PalletInstance', value: 50 },
+          { type: 'GeneralIndex', value: 1337n },
+        ],
+      },
+    },
   },
-}
-const DOT_PAH_LOCAL_LOC = {
-  parents: 1,
-  interior: { type: 'Here', value: undefined },
+  kah: {
+    threshold: 25_000_000_000n,  // 0.025 KSM (12 dec)
+    topup: 50_000_000_000n,      // 0.05 KSM
+    usdcMax: 5_000_000n,          // 5 USDC
+    nativeLoc: { parents: 1, interior: { type: 'Here', value: undefined } },
+    usdcLoc: {
+      parents: 2,
+      interior: {
+        type: 'X4',
+        value: [
+          { type: 'GlobalConsensus', value: { type: 'Polkadot', value: undefined } },
+          { type: 'Parachain', value: 1000 },
+          { type: 'PalletInstance', value: 50 },
+          { type: 'GeneralIndex', value: 1337n },
+        ],
+      },
+    },
+  },
 }
 
 /**
  * Build an `AssetConversion.swap_tokens_for_exact_tokens` call that swaps
- * USDC for exactly `PAH_DOT_TOPUP_AMOUNT` of DOT, sending the DOT to `sender`.
- * Used to top up DOT for PAH bridge delivery fees when needed.
+ * USDC for `topup` of native (DOT on PAH, KSM on KAH), depositing into
+ * `sender`. Used to top up native for bridge delivery fees when needed.
  */
-function buildPahDotSwapCall(srcApi: SrcApi, sender: string): UnsignedTx | null {
+function buildFeeSwapCall(srcApi: SrcApi, source: ChainId, sender: string): UnsignedTx | null {
+  const cfg = SWAP_CONFIG[source]
+  if (!cfg) return null
   const ac = srcApi.tx.AssetConversion
   if (!ac?.swap_tokens_for_exact_tokens) {
-    console.warn('[donate] AssetConversion.swap_tokens_for_exact_tokens unavailable on source')
+    console.warn(`[xcmFlow] AssetConversion.swap_tokens_for_exact_tokens unavailable on ${source}`)
     return null
   }
   // pallet-asset-conversion's signature is `send_to: T::AccountId` (raw
   // AccountId32, NOT a MultiAddress lookup). Pass the SS58 string directly.
   return ac.swap_tokens_for_exact_tokens({
-    path: [USDC_PAH_LOCAL_LOC, DOT_PAH_LOCAL_LOC],
-    amount_out: PAH_DOT_TOPUP_AMOUNT,
-    amount_in_max: PAH_USDC_SWAP_MAX,
+    path: [cfg.usdcLoc, cfg.nativeLoc],
+    amount_out: cfg.topup,
+    amount_in_max: cfg.usdcMax,
     send_to: sender,
     keep_alive: true,
   })
 }
 
 /**
- * Wrap the donation tx with an optional preceding USDC→DOT swap so that the
- * PAH bridge delivery fee can be paid from DOT (it's not swappable from USDC
- * by the XcmRouter). Skips the swap if the user already has enough DOT.
+ * Wrap the donation/transfer tx with an optional preceding USDC→native swap
+ * so that the bridge delivery fee can be paid from native (DOT on PAH, KSM on
+ * KAH). Skips the swap if the user already has enough native, OR if the
+ * source isn't an asset hub, OR if the donation token isn't USDC.
  *
- * Only relevant for source=PAH. For other sources the donation tx is returned
- * unchanged.
+ * The wrapping uses `Utility.batch_all` so the swap and the donation are an
+ * atomic unit under one signature.
  */
-async function maybeWrapWithDotSwap(
+export async function maybeWrapWithFeeSwap(
   srcApi: SrcApi,
   source: ChainId,
+  token: TokenSymbol,
   donation: UnsignedTx,
   sender: string,
 ): Promise<UnsignedTx> {
-  if (source !== 'pah') return donation
-  const dotBalance = await fetchNativeBalance(source, sender)
-  if (dotBalance !== null && dotBalance >= PAH_DOT_BRIDGE_THRESHOLD) {
-    console.log(`[donate] PAH DOT balance ${dotBalance} ≥ threshold ${PAH_DOT_BRIDGE_THRESHOLD}; skipping fee-swap`)
+  if (token !== 'USDC') return donation
+  const cfg = SWAP_CONFIG[source]
+  if (!cfg) return donation
+  const native = await fetchNativeBalance(source, sender)
+  const meta = sourceFeeAsset(source)
+  const fmt = (v: bigint) => `${(Number(v) / 10 ** meta.decimals).toFixed(6)} ${meta.symbol}`
+  if (native !== null && native >= cfg.threshold) {
+    console.log(`[xcmFlow] ${source} native balance ${fmt(native)} ≥ threshold ${fmt(cfg.threshold)}; skipping fee-swap`)
     return donation
   }
-  console.log(`[donate] PAH DOT balance ${dotBalance ?? 'unknown'} < threshold; prepending USDC→DOT swap (target ${PAH_DOT_TOPUP_AMOUNT} planck = 0.01 DOT)`)
-  const swap = buildPahDotSwapCall(srcApi, sender)
+  console.log(`[xcmFlow] ${source} native balance ${native !== null ? fmt(native) : 'unknown'} < threshold ${fmt(cfg.threshold)}; prepending USDC→${meta.symbol} swap (target ${fmt(cfg.topup)})`)
+  const swap = buildFeeSwapCall(srcApi, source, sender)
   if (!swap) return donation
   return srcApi.tx.Utility.batch_all({
     calls: [swap.decodedCall, donation.decodedCall],
@@ -662,7 +698,7 @@ export interface BalanceImpact {
   recipientReceipts: RecipientReceipt[]
 }
 
-interface DryRunSummary {
+export interface DryRunSummary {
   sourceOk: boolean
   sourceMessage: string | null
   destinations: DestinationDryRunResult[]
@@ -1130,7 +1166,7 @@ function extractRecipientReceipts(
  * For sibling teleports (`limited_teleport_assets`), we use the source's
  * `forwarded_xcms` directly against the sibling destination.
  */
-async function dryRunFull(
+export async function dryRunFull(
   source: ChainId,
   decodedCall: unknown,
   senderAddress: string,
@@ -1218,7 +1254,7 @@ function stringifyShallow(v: unknown): string {
 }
 
 /** Read source-chain native (free) balance for `address`. */
-async function fetchNativeBalance(source: ChainId, address: string): Promise<bigint | null> {
+export async function fetchNativeBalance(source: ChainId, address: string): Promise<bigint | null> {
   const client = getClient(source)
   if (!client) return null
   try {
@@ -1241,7 +1277,7 @@ async function fetchNativeBalance(source: ChainId, address: string): Promise<big
  *     to asset-conversion (USDC on the asset hubs) and re-estimate.
  *  4. If both fail, the last successful estimate's strategy is used.
  */
-interface FeeStrategy {
+export interface FeeStrategy {
   txOpts: PapiTxOptions | undefined
   /** Fee in NATIVE units (what the runtime returns from getEstimatedFees). */
   nativeFee: bigint
@@ -1250,7 +1286,7 @@ interface FeeStrategy {
   usdcFee?: bigint
 }
 
-async function decideFeeStrategy(
+export async function decideFeeStrategy(
   source: ChainId,
   token: TokenSymbol,
   primaryTx: UnsignedTx,

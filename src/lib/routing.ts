@@ -31,6 +31,10 @@ const ROUTE_TABLE = new Map<string, Hop[]>([
   // USDC: KAH <-> PAH (1 hop, bridge)
   [key({ token: 'USDC', from: 'kah', to: 'pah' }), [hop('kah', 'pah')]],
   [key({ token: 'USDC', from: 'pah', to: 'kah' }), [hop('pah', 'kah')]],
+
+  // DOT: KAH <-> PAH (1 hop, bridge) — DOT lives on PAH; on KAH it's a foreign asset.
+  [key({ token: 'DOT', from: 'pah', to: 'kah' }), [hop('pah', 'kah')]],
+  [key({ token: 'DOT', from: 'kah', to: 'pah' }), [hop('kah', 'pah')]],
 ])
 
 export function resolveRoute(token: TokenSymbol, from: ChainId, to: ChainId): Route | null {
