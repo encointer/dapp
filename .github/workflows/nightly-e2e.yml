@@ -1,6 +1,12 @@
 name: nightly-e2e
 
 on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
   schedule:
     - cron: '0 3 * * *'  # 03:00 UTC daily
   workflow_dispatch:     # manual trigger from the Actions tab
