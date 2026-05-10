@@ -11,11 +11,13 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@paraspell/sdk": "^12",
-    "polkadot-api": "^1"
+    "@paraspell/sdk": "^13",
+    "polkadot-api": "^2"
   },
   "pnpm": {
-    "onlyBuiltDependencies": ["esbuild"]
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^5",

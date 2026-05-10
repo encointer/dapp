@@ -1,4 +1,4 @@
-import { AccountId, Binary } from 'polkadot-api'
+import { AccountId } from 'polkadot-api'
 import { getClient } from './provider.svelte'
 import { getTurnoverLastNMonths, getCurrentReputables } from './accountingApi'
 import { convertCcToUsd, convertUsdToCc, ksmToUsdc } from './forex'
@@ -107,7 +107,6 @@ function encodeBase58(bytes: Uint8Array): string {
 const ksmSs58 = AccountId(KSM_SS58_PREFIX)
 
 function asBytes(v: unknown): Uint8Array {
-  if (v instanceof Binary) return v.asBytes()
   if (v instanceof Uint8Array) return v
   if (typeof v === 'object' && v !== null && 'asBytes' in v && typeof (v as { asBytes: unknown }).asBytes === 'function') {
     return (v as { asBytes: () => Uint8Array }).asBytes()
@@ -145,6 +144,12 @@ function accountToSs58AndBytes(v: unknown): { ss58: string; bytes: Uint8Array } 
   if (typeof v === 'string') return { ss58: v, bytes: ss58ToBytes(v) }
   const bytes = asBytes(v)
   return { ss58: ksmSs58.dec(bytes), bytes }
+}
+
+/** PAPI v2 encodes fixed-size byte arrays (e.g. `[u8; 32]`) as hex strings,
+ *  not `Uint8Array`. Convert when passing them as runtime-call args. */
+function bytesToHex(bytes: Uint8Array): string {
+  return '0x' + Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('')
 }
 
 let faucets = $state<Faucet[]>([])
@@ -264,20 +269,24 @@ async function deriveKahAccount(kahApi: UnsafeApi, treasuryBytes: Uint8Array): P
           type: 'X2',
           value: [
             { type: 'Parachain', value: ENCOINTER_PARA_ID },
-            { type: 'AccountId32', value: { network: undefined, id: Binary.fromBytes(treasuryBytes) } },
+            { type: 'AccountId32', value: { network: undefined, id: bytesToHex(treasuryBytes) } },
           ],
         },
       },
     }
     try {
-      const result = await kahApi.apis.LocationToAccountApi.convert_location(versionedLoc) as
-        | { success: true; value: unknown }
-        | { success: false; value: unknown }
-      if (result.success) {
-        return accountFromKey(result.value)
+      const raw = await kahApi.apis.LocationToAccountApi.convert_location(versionedLoc)
+      // PAPI v2 returns `Result` as `{ type: 'Ok'|'Err', value }`; some
+      // configurations unwrap directly to the AccountId.
+      if (typeof raw === 'string' || raw instanceof Uint8Array) {
+        return accountFromKey(raw)
+      }
+      const r = raw as { success?: boolean; type?: string; value?: unknown }
+      if (r.success === true || r.type === 'Ok') {
+        return accountFromKey(r.value)
       }
     } catch {
-      // try lower version
+      // try the next-lower XCM version
     }
   }
   return null

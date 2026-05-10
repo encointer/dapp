@@ -1,5 +1,5 @@
 import { Builder, getExistentialDeposit } from '@paraspell/sdk'
-import { AccountId, Binary, getSs58AddressInfo } from 'polkadot-api'
+import { AccountId, getSs58AddressInfo } from 'polkadot-api'
 import type { PolkadotSigner } from 'polkadot-api'
 import type { ChainId, TokenSymbol } from './types'
 import { CHAINS, toParaSpell, getCurrency } from './chains'
@@ -307,13 +307,13 @@ async function buildCrossChainCall(
 ): Promise<UnsignedTx> {
   const overrides = getApiOverrides()
   if (!overrides) throw new Error('Not connected to chains')
-  const currency = { ...getCurrency(source, token), amount: amount.toString() }
+  const currency = { ...getCurrency(source, token), amount: amount }
   const tx = await Builder({ apiOverrides: overrides })
     .from(toParaSpell(source))
     .to(toParaSpell(dest))
     .currency(currency)
-    .address(beneficiary)
-    .senderAddress(senderAddress)
+    .recipient(beneficiary)
+    .sender(senderAddress)
     .build()
   return tx as unknown as UnsignedTx
 }
@@ -403,13 +403,13 @@ async function tryBuildConsolidatedXcm(
   const srcApi = srcClient.getUnsafeApi() as unknown as SrcApi
 
   // Build paraspell tx for the first recipient with the TOTAL amount.
-  const currency = { ...getCurrency(source, token), amount: totalAmount.toString() }
+  const currency = { ...getCurrency(source, token), amount: totalAmount }
   const psTx = await Builder({ apiOverrides: overrides })
     .from(toParaSpell(source))
     .to(toParaSpell(dest))
     .currency(currency)
-    .address(recipients[0].address)
-    .senderAddress(senderAddress)
+    .recipient(recipients[0].address)
+    .sender(senderAddress)
     .build()
 
   // Inspect & patch the decoded call.
@@ -476,12 +476,15 @@ async function tryBuildConsolidatedXcm(
 
   // Note: PAPI flattens `Junctions::X1([Junction; 1])` to a single Junction
   // (not an array of length 1). X2..X8 do use arrays.
-  const beneficiaryFor = (addr: string) => ({
-    parents: 0,
-    interior: xcmStyle === 'papi'
-      ? { type: 'X1', value: { type: 'AccountId32', value: { network: undefined, id: Binary.fromBytes(ksmSs58.enc(addr)) } } }
-      : { X1: { AccountId32: { network: null, id: Binary.fromBytes(ksmSs58.enc(addr)) } } },
-  })
+  const beneficiaryFor = (addr: string) => {
+    const idHex = '0x' + Array.from(ksmSs58.enc(addr)).map(b => b.toString(16).padStart(2, '0')).join('')
+    return {
+      parents: 0,
+      interior: xcmStyle === 'papi'
+        ? { type: 'X1', value: { type: 'AccountId32', value: { network: undefined, id: idHex } } }
+        : { X1: { AccountId32: { network: null, id: idHex } } },
+    }
+  }
 
   const newDeposits = recipients.map((r, i) => {
     const isLast = i === recipients.length - 1
@@ -1476,18 +1479,6 @@ function isUserCancel(err: unknown): boolean {
   return msg.includes('cancel') || msg.includes('reject') || msg.includes('user denied')
 }
 
-async function logEncodedHex(label: string, tx: UnsignedTx): Promise<void> {
-  try {
-    const txEnc = tx as unknown as { getEncodedData?: () => Promise<{ asHex: () => string }> }
-    const bin = await txEnc.getEncodedData?.()
-    if (bin && typeof bin.asHex === 'function') {
-      console.log(`[${label}] encoded call hex:`, bin.asHex())
-    }
-  } catch (err) {
-    console.warn(`[${label}] failed to dump encoded hex:`, err)
-  }
-}
-
 function extractTxHash(res: unknown): string | null {
   if (typeof res === 'string' && res.startsWith('0x')) return res
   if (typeof res === 'object' && res !== null) {
@@ -1524,7 +1515,6 @@ export async function executeDonate(
       const batch = await buildBatch(params.source, calls)
       if (batch) {
         state = { step: 'executing', mode: 'batch', current: 0, total: 1 }
-        await logEncodedHex('donate batch', batch)
         try {
           const res = await batch.signAndSubmit(signer, (assertSafeFeeAsset(txOpts), withSignedExtOverride(txOpts)))
           const txHash = extractTxHash(res)
@@ -1542,7 +1532,6 @@ export async function executeDonate(
     } else {
       // Single call (e.g. consolidated XCM, or single recipient).
       state = { step: 'executing', mode: 'batch', current: 0, total: 1 }
-      await logEncodedHex('donate single', calls[0])
       try {
         const res = await calls[0].signAndSubmit(signer, (assertSafeFeeAsset(txOpts), withSignedExtOverride(txOpts)))
         const txHash = extractTxHash(res)

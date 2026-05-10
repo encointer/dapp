@@ -1,12 +1,11 @@
 import { createClient, type PolkadotClient } from 'polkadot-api'
 import { getSmProvider } from 'polkadot-api/sm-provider'
-import { getWsProvider } from 'polkadot-api/ws-provider/web'
-import { withPolkadotSdkCompat } from 'polkadot-api/polkadot-sdk-compat'
+import { getWsProvider } from 'polkadot-api/ws'
 import { startFromWorker } from 'polkadot-api/smoldot/from-worker'
-import { chainSpec as kusamaSpec } from 'polkadot-api/chains/ksmcc3'
+import { chainSpec as kusamaSpec } from 'polkadot-api/chains/kusama'
 import { chainSpec as polkadotSpec } from 'polkadot-api/chains/polkadot'
-import { chainSpec as encointerSpec } from 'polkadot-api/chains/ksmcc3_encointer'
-import { chainSpec as kahSpec } from 'polkadot-api/chains/ksmcc3_asset_hub'
+import { chainSpec as encointerSpec } from 'polkadot-api/chains/kusama_encointer'
+import { chainSpec as kahSpec } from 'polkadot-api/chains/kusama_asset_hub'
 import { chainSpec as pahSpec } from 'polkadot-api/chains/polkadot_asset_hub'
 import { CHAINS, CHAIN_IDS } from './chains'
 import type { ChainId, ProviderMode, SyncStatus, ParaSpellChain } from './types'
@@ -46,17 +45,17 @@ async function createSmoldotClients(): Promise<Clients> {
   ])
 
   return {
-    encointer: createClient(getSmProvider(encointerChain)),
-    kah: createClient(getSmProvider(kahChain)),
-    pah: createClient(getSmProvider(pahChain)),
+    encointer: createClient(getSmProvider(() => encointerChain)),
+    kah: createClient(getSmProvider(() => kahChain)),
+    pah: createClient(getSmProvider(() => pahChain)),
   }
 }
 
 function createRpcClients(): Clients {
   return {
-    encointer: createClient(withPolkadotSdkCompat(getWsProvider(CHAINS.encointer.rpcEndpoints[0]))),
-    kah: createClient(withPolkadotSdkCompat(getWsProvider(CHAINS.kah.rpcEndpoints[0]))),
-    pah: createClient(withPolkadotSdkCompat(getWsProvider(CHAINS.pah.rpcEndpoints[0]))),
+    encointer: createClient(getWsProvider(CHAINS.encointer.rpcEndpoints[0])),
+    kah: createClient(getWsProvider(CHAINS.kah.rpcEndpoints[0])),
+    pah: createClient(getWsProvider(CHAINS.pah.rpcEndpoints[0])),
   }
 }
 
