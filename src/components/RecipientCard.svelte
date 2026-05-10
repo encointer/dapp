@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { Faucet, Treasury } from '../lib/recipients.svelte'
-  import { formatBalance, truncateAddress } from '../lib/format'
+  import { formatBalance, formatNumber, truncateAddress } from '../lib/format'
   import { subscanAccountUrl } from '../lib/donate.svelte'
   import AddressProofModal from './AddressProofModal.svelte'
 
@@ -79,7 +79,7 @@
         {#if props.data.dripUsdc === undefined}
           <span class="spinner spinner-sm"></span>
         {:else if props.data.dripUsdc !== null}
-          <span class="dim-text">(≈ {props.data.dripUsdc.toLocaleString(undefined, { maximumFractionDigits: 2 })} USD)</span>
+          <span class="dim-text">(≈ {formatNumber(props.data.dripUsdc, 2)} USD)</span>
         {/if}
         every 10 days
       </div>
@@ -114,7 +114,7 @@
   {:else}
     {@const t = props.data}
     {@const sym = t.symbol || 'CC'}
-    {@const fmtCc = (v: number | null) => v == null ? '—' : v.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+    {@const fmtCc = (v: number | null) => formatNumber(v, 0)}
     {@const pctOfSupply = t.treasuryCcEquivalent !== null && t.moneySupply !== null && t.moneySupply > 0
       ? (t.treasuryCcEquivalent / t.moneySupply) * 100 : null}
     {@const pctOfTurnover = t.treasuryCcEquivalent !== null && t.turnoverLast3Months !== null && t.turnoverLast3Months > 0

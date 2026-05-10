@@ -3,7 +3,7 @@
   import { CHAINS, getDecimals } from '../lib/chains'
   import { getWalletState } from '../lib/wallet.svelte'
   import { getBalanceFor } from '../lib/balances.svelte'
-  import { formatBalance, parseAmount, truncateAddress } from '../lib/format'
+  import { formatBalance, formatNumber, parseAmount, truncateAddress } from '../lib/format'
   import {
     loadRecipients,
     getFaucets,
@@ -236,7 +236,7 @@
       if (!anyKnown) return null
       const totalUsdc = Number(totalAmount) / 1e6
       if (totalUsdc <= threshold) return null
-      return `Your donation (~${totalUsdc.toLocaleString(undefined, { maximumFractionDigits: 0 })} USDC) exceeds the selected communities' total turnover over the last 3 months (~${threshold.toLocaleString(undefined, { maximumFractionDigits: 0 })} USDC). It may currently be too high in relation to community activity.`
+      return `Your donation (~${formatNumber(totalUsdc, 0)} USDC) exceeds the selected communities' total turnover over the last 3 months (~${formatNumber(threshold, 0)} USDC). It may currently be too high in relation to community activity.`
     } else {
       // KSM: per faucet, expected drips per cycle = attestedPersons × dripAmount.
       let threshold = 0n
@@ -245,7 +245,7 @@
         threshold += BigInt(f.attestedPersons) * f.dripAmount * CYCLES_PER_6M
       }
       if (totalAmount <= threshold && threshold > 0n) return null
-      const fmt = (v: bigint) => (Number(v) / 1e12).toLocaleString(undefined, { maximumFractionDigits: 4 })
+      const fmt = (v: bigint) => formatNumber(Number(v) / 1e12, 4)
       if (threshold === 0n) {
         return `The selected faucets currently have no recently active drippers. This donation may sit unspent in the pot for some time.`
       }
