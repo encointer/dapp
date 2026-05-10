@@ -1,0 +1,8 @@
+endpoint:
+  - wss://kusama-asset-hub-rpc.polkadot.io
+  - wss://sys.ibp.network/statemine
+port: 8101
+mock-signature-host: true
+build-block-mode: Instant
+db: ./.chopsticks-db/kah.sqlite
+allow-unresolved-imports: true
