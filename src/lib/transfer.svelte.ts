@@ -1,5 +1,5 @@
 import { Builder, getExistentialDeposit } from '@paraspell/sdk'
-import type { PolkadotSigner } from 'polkadot-api'
+import { Binary, getSs58AddressInfo, type PolkadotSigner } from 'polkadot-api'
 import type { TransferParams, TransferState, HopFee, HopProgress, Route, FeeDetail, ChainId } from './types'
 import { resolveRoute } from './routing'
 import { CHAINS, toParaSpell, getCurrency } from './chains'
@@ -7,6 +7,7 @@ import { quoteUsdcForExactNative } from './forex'
 import { getApiOverrides, getClient } from './provider.svelte'
 import {
   decideFeeStrategy, dryRunFull, maybeWrapWithFeeSwap, sourceFeeAsset, fetchNativeBalance,
+  withSignedExtOverride, assertSafeFeeAsset,
   type SrcApi, type UnsignedTx, type DryRunSummary, type PapiTxOptions,
 } from './donate.svelte'
 
@@ -138,6 +139,118 @@ function usdcAssetForFee(chain: import('./types').ChainId): unknown | undefined 
   return undefined
 }
 
+/** PAH from KAH's perspective: cross-consensus into Polkadot, parachain 1000. */
+const PAH_FROM_KAH_LOC = {
+  parents: 2,
+  interior: {
+    type: 'X2',
+    value: [
+      { type: 'GlobalConsensus', value: { type: 'Polkadot', value: undefined } },
+      { type: 'Parachain', value: 1000 },
+    ],
+  },
+}
+
+/**
+ * Manually build the KAH→PAH USDC bridged transfer call.
+ *
+ * paraspell 12.7.1 mis-routes this case (`getBridgeReserve` does a case-
+ * sensitive comparison between `getRelayChainOf(dest).toLowerCase()` and the
+ * `GlobalConsensus` junction's PascalCase variant), so it picks `LocalReserve`
+ * and the message is rejected at PAH with `UntrustedReserveLocation`. We
+ * therefore build `transfer_assets_using_type_and_then` directly with the
+ * correct `DestinationReserve` semantics: KAH burns the bridged-USDC mirror
+ * locally and the message that arrives at PAH withdraws the canonical USDC
+ * from PAH's sovereign holding for the recipient.
+ */
+function buildKahPahUsdcCall(
+  srcApi: ExtendedSrcApi,
+  recipient: string,
+  amount: bigint,
+): UnsignedTx {
+  const info = getSs58AddressInfo(recipient)
+  if (!info.isValid) throw new Error(`Invalid recipient address: ${recipient}`)
+  const recipientBytes = Binary.fromBytes(info.publicKey)
+
+  // Locations relative to KAH (origin frame):
+  const usdcOnKah = USDC_KAH_FOREIGN_LOC
+
+  // Locations relative to PAH (where customXcmOnDest executes):
+  const usdcOnPah = USDC_PAH_LOC
+
+  // PAPI typed-enum form (`{ type, value }`). Two paraspell-mirroring
+  // quirks: (1) `Junctions::X1` flattens to a single Junction (not an
+  // array of one) — PAPI's untyped tx builder requires this. (2)
+  // `AccountId32` is `{ id }` with NO `network` field. paraspell's
+  // `createAccountPayload` omits it; including `network: undefined`
+  // appears to mis-encode the Option byte and corrupts what the wallet
+  // tries to decode for display, crashing it.
+  const beneficiary = {
+    parents: 0,
+    interior: {
+      type: 'X1',
+      value: { type: 'AccountId32', value: { id: recipientBytes } },
+    },
+  }
+
+  const customXcm = {
+    type: 'V5',
+    value: [
+      {
+        type: 'BuyExecution',
+        value: {
+          fees: { id: usdcOnPah, fun: { type: 'Fungible', value: amount } },
+          weight_limit: { type: 'Unlimited' },
+        },
+      },
+      {
+        type: 'DepositAsset',
+        value: {
+          assets: { type: 'Wild', value: { type: 'AllCounted', value: 1 } },
+          beneficiary,
+        },
+      },
+    ],
+  }
+
+  const args = {
+    dest: { type: 'V5', value: PAH_FROM_KAH_LOC },
+    assets: {
+      type: 'V5',
+      value: [{ id: usdcOnKah, fun: { type: 'Fungible', value: amount } }],
+    },
+    assets_transfer_type: { type: 'DestinationReserve' },
+    remote_fees_id: { type: 'V5', value: usdcOnKah },
+    fees_transfer_type: { type: 'DestinationReserve' },
+    custom_xcm_on_dest: customXcm,
+    weight_limit: { type: 'Unlimited' },
+  }
+  const replacer = (_k: string, v: unknown): unknown => {
+    if (typeof v === 'bigint') return v.toString() + 'n'
+    if (v instanceof Uint8Array) return '0x' + Array.from(v).map(b => b.toString(16).padStart(2, '0')).join('')
+    return v
+  }
+  console.log('[transfer] kah→pah USDC manual call args:', JSON.stringify(args, replacer, 2))
+  const tx = srcApi.tx.PolkadotXcm.transfer_assets_using_type_and_then(args)
+  // Log the SCALE-encoded call hex so the user can decode it manually
+  // (e.g. paste into polkadot.js apps "Decode" tab).
+  ;(async () => {
+    try {
+      const txEnc = tx as unknown as { getEncodedData?: () => Promise<{ asHex: () => string }> }
+      const bin = await txEnc.getEncodedData?.()
+      if (bin && typeof bin.asHex === 'function') {
+        console.log('[transfer] kah→pah USDC encoded call hex:', bin.asHex())
+      } else {
+        console.log('[transfer] kah→pah USDC: getEncodedData returned unexpected:', bin)
+      }
+    } catch (err) {
+      console.warn('[transfer] failed to dump encoded hex:', err)
+    }
+  })()
+  return tx
+}
+
+
 /** Existential deposit of the chain's native token, queried via paraspell. */
 function nativeED(chain: ChainId, token: import('./types').TokenSymbol): bigint {
   try {
@@ -186,18 +299,26 @@ async function buildHopTx(
     return { tx: keepAliveTx, txOpts: strategy.txOpts }
   }
 
-  // Cross-chain via paraspell.
-  const overrides = getApiOverrides()
-  if (!overrides) throw new Error('Not connected to chains')
-  const currency = { ...getCurrency(hop.from, token), amount: amount.toString() }
-  const psTx = await Builder({ apiOverrides: overrides })
-    .from(toParaSpell(hop.from))
-    .to(toParaSpell(hop.to))
-    .currency(currency)
-    .address(recipient)
-    .senderAddress(senderAddress)
-    .build()
-  const tx = await maybeWrapWithFeeSwap(srcApi, hop.from, token, psTx as unknown as UnsignedTx, senderAddress)
+  // Cross-chain. paraspell 12.7.1 mis-routes KAH→PAH USDC (LocalReserve
+  // instead of DestinationReserve due to a case-sensitivity bug in
+  // `getBridgeReserve`), so we build that one call manually.
+  let baseTx: UnsignedTx
+  if (hop.from === 'kah' && hop.to === 'pah' && token === 'USDC') {
+    baseTx = buildKahPahUsdcCall(srcApi, recipient, amount)
+  } else {
+    const overrides = getApiOverrides()
+    if (!overrides) throw new Error('Not connected to chains')
+    const currency = { ...getCurrency(hop.from, token), amount: amount.toString() }
+    const psTx = await Builder({ apiOverrides: overrides })
+      .from(toParaSpell(hop.from))
+      .to(toParaSpell(hop.to))
+      .currency(currency)
+      .address(recipient)
+      .senderAddress(senderAddress)
+      .build()
+    baseTx = psTx as unknown as UnsignedTx
+  }
+  const tx = await maybeWrapWithFeeSwap(srcApi, hop.from, token, baseTx, senderAddress)
   const strategy = await decideFeeStrategy(hop.from, token, tx, senderAddress)
   return { tx, txOpts: strategy.txOpts }
 }
@@ -231,6 +352,19 @@ export async function estimateFees(
         fees.push({
           hop,
           origin: { fee: dispatchFee, symbol: meta.symbol, decimals: meta.decimals },
+          destination: { fee: 0n, symbol: '', decimals: 12 },
+        })
+      } else if (hop.from === 'kah' && hop.to === 'pah' && params.token === 'USDC') {
+        // Manually-built call — paraspell's `getXcmFee` would build the
+        // (mis-routed) LocalReserve variant, so we can't ask it. Show the
+        // dispatch fee from `getEstimatedFees` and rely on the dry-run for
+        // accurate balance impact.
+        let dispatchFee = 0n
+        try { dispatchFee = await built.tx.getEstimatedFees(senderAddress, built.txOpts) } catch { /* fall back to 0 */ }
+        const meta = sourceFeeAsset(hop.from)
+        const origin = await enrichWithQuote({ fee: dispatchFee, symbol: meta.symbol, decimals: meta.decimals })
+        fees.push({
+          hop, origin,
           destination: { fee: 0n, symbol: '', decimals: 12 },
         })
       } else {
@@ -304,7 +438,8 @@ export async function executeTransfer(
 
     try {
       const built = await buildHopTx(hop, params.token, params.amount, address, params.recipient)
-      const res = await built.tx.signAndSubmit(signer, built.txOpts)
+      assertSafeFeeAsset(built.txOpts)
+      const res = await built.tx.signAndSubmit(signer, withSignedExtOverride(built.txOpts))
       const txHash = extractTxHash(res)
 
       hopProgresses[i] = { ...hopProgresses[i], status: 'success', txHash: txHash ?? undefined }

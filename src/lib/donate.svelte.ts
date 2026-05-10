@@ -136,6 +136,77 @@ export interface SrcApi {
 
 export interface PapiTxOptions {
   asset?: unknown
+  customSignedExtensions?: Record<string, { value?: Uint8Array | unknown; additionalSigned?: Uint8Array | unknown }>
+}
+
+/**
+ * Force `CheckMetadataHash` to `Mode::Disabled` so PAPI doesn't include a
+ * metadataHash in the SignerPayload. Mirrors polkadot.js apps's behavior.
+ * Kept defensively even though the actual crash culprit was elsewhere
+ * (`ChargeAssetTxPayment.assetId` with a cross-consensus Location, see
+ * `assertSafeFeeAsset`). The chain accepts both Disabled and Enabled modes,
+ * so this is a no-op on the runtime side.
+ */
+export const SIGNED_EXT_OVERRIDE: NonNullable<PapiTxOptions['customSignedExtensions']> = {
+  CheckMetadataHash: {
+    value: new Uint8Array([0]),       // Mode::Disabled
+    additionalSigned: new Uint8Array([0]),  // Option::None for the metadata hash
+  },
+}
+
+export function withSignedExtOverride(opts?: PapiTxOptions): PapiTxOptions {
+  return {
+    ...(opts ?? {}),
+    customSignedExtensions: { ...SIGNED_EXT_OVERRIDE, ...(opts?.customSignedExtensions ?? {}) },
+  }
+}
+
+/**
+ * The polkadot-js-extension and SubWallet bundle a polkadot.js types library
+ * whose `TAssetConversion` decoder cannot handle V5 cross-consensus Locations
+ * (e.g. `parents:2, X4[GlobalConsensus(Polkadot), Parachain(1000),
+ * PalletInstance(50), GeneralIndex(1337)]`) when used as the `assetId` of the
+ * `ChargeAssetTxPayment` signed extension. Decoding fails with
+ * "Unable to create Enum via index 9, in Here, X1..X8" and the React error
+ * boundary leaves the extension UI corrupted until browser restart.
+ *
+ * Detect the unsafe shape (`parents >= 2 && interior contains GlobalConsensus`)
+ * and throw a clear error instead of letting the wallet crash. PAH-local USDC
+ * (`parents:0, X2[PalletInstance, GeneralIndex]`) is fine.
+ */
+export function isCrossConsensusLocation(loc: unknown): boolean {
+  if (!loc || typeof loc !== 'object') return false
+  const l = loc as { parents?: number; interior?: unknown }
+  if ((l.parents ?? 0) < 2) return false
+  const interior = l.interior as { type?: string; value?: unknown } | { X1?: unknown; X2?: unknown; X3?: unknown; X4?: unknown } | undefined
+  if (!interior) return false
+  // PAPI typed enum: { type: 'X4', value: [...] }
+  const arr = (interior as { type?: string; value?: unknown }).type
+    ? (interior as { value?: unknown }).value
+    // pjs-style: { X4: [...] }
+    : Object.values(interior).find(v => Array.isArray(v))
+  const junctions = Array.isArray(arr) ? arr : null
+  if (!junctions) return false
+  return junctions.some(j => {
+    if (!j || typeof j !== 'object') return false
+    const jo = j as { type?: string } & Record<string, unknown>
+    if (jo.type === 'GlobalConsensus') return true
+    if ('GlobalConsensus' in jo) return true
+    return false
+  })
+}
+
+export function assertSafeFeeAsset(opts?: PapiTxOptions): void {
+  if (!opts?.asset) return
+  if (isCrossConsensusLocation(opts.asset)) {
+    throw new Error(
+      'Cannot pay fees with a bridged asset (cross-consensus Location). ' +
+      'The polkadot-js / SubWallet extensions crash trying to decode this ' +
+      'shape in `ChargeAssetTxPayment.assetId`. Top up the source chain\'s ' +
+      'native token (e.g. KSM on Asset Hub Kusama) so the dispatch fee can ' +
+      'be paid in the native asset, or use a different wallet.',
+    )
+  }
 }
 
 export interface UnsignedTx {
@@ -894,10 +965,14 @@ function extractTransferAssetsArgs(call: unknown): Record<string, unknown> | nul
 }
 
 /**
- * Build the XCM that the destination chain (KAH) would execute when the
- * source's `transfer_assets_using_type_and_then` lands. Bridge transit is
- * assumed transparent — the destination receives the assets as
- * `ReserveAssetDeposited` followed by the `customXcmOnDest` we supplied.
+ * Build the XCM that the destination chain would execute when the source's
+ * `transfer_assets_using_type_and_then` lands. Bridge transit is assumed
+ * transparent. The first instruction depends on `assets_transfer_type`:
+ *
+ *   - `LocalReserve` (origin holds reserve, e.g. PAH→KAH USDC)
+ *     → destination receives `ReserveAssetDeposited` (mints mirror).
+ *   - `DestinationReserve` (destination holds reserve, e.g. KAH→PAH USDC)
+ *     → destination receives `WithdrawAsset` (releases canonical from sov).
  *
  * Returns the V5-wrapped XCM ready for `DryRunApi.dry_run_xcm`.
  */
@@ -922,11 +997,17 @@ function buildArrivalXcmFromTransferArgs(args: Record<string, unknown>): unknown
 
   const totalAmount = (sourceAssetEntry.fun as { value?: bigint })?.value ?? 0n
 
+  // Detect transfer type. PAPI emits enum form `{ type: 'X', value: ... }`;
+  // paraspell may also use bare strings. Fall back to LocalReserve.
+  const xferType = args.assets_transfer_type as { type?: string } | string | undefined
+  const xferTag = typeof xferType === 'string' ? xferType : xferType?.type
+  const arrivalInstr = xferTag === 'DestinationReserve' ? 'WithdrawAsset' : 'ReserveAssetDeposited'
+
   return {
     type: 'V5',
     value: [
       {
-        type: 'ReserveAssetDeposited',
+        type: arrivalInstr,
         value: [{ id: destAssetId, fun: { type: 'Fungible', value: totalAmount } }],
       },
       { type: 'ClearOrigin', value: undefined },
@@ -1395,6 +1476,18 @@ function isUserCancel(err: unknown): boolean {
   return msg.includes('cancel') || msg.includes('reject') || msg.includes('user denied')
 }
 
+async function logEncodedHex(label: string, tx: UnsignedTx): Promise<void> {
+  try {
+    const txEnc = tx as unknown as { getEncodedData?: () => Promise<{ asHex: () => string }> }
+    const bin = await txEnc.getEncodedData?.()
+    if (bin && typeof bin.asHex === 'function') {
+      console.log(`[${label}] encoded call hex:`, bin.asHex())
+    }
+  } catch (err) {
+    console.warn(`[${label}] failed to dump encoded hex:`, err)
+  }
+}
+
 function extractTxHash(res: unknown): string | null {
   if (typeof res === 'string' && res.startsWith('0x')) return res
   if (typeof res === 'object' && res !== null) {
@@ -1431,8 +1524,9 @@ export async function executeDonate(
       const batch = await buildBatch(params.source, calls)
       if (batch) {
         state = { step: 'executing', mode: 'batch', current: 0, total: 1 }
+        await logEncodedHex('donate batch', batch)
         try {
-          const res = await batch.signAndSubmit(signer, txOpts)
+          const res = await batch.signAndSubmit(signer, (assertSafeFeeAsset(txOpts), withSignedExtOverride(txOpts)))
           const txHash = extractTxHash(res)
           if (txHash) submitted.push({ txHash, chain: params.source })
           state = { step: 'success', submitted }
@@ -1448,8 +1542,9 @@ export async function executeDonate(
     } else {
       // Single call (e.g. consolidated XCM, or single recipient).
       state = { step: 'executing', mode: 'batch', current: 0, total: 1 }
+      await logEncodedHex('donate single', calls[0])
       try {
-        const res = await calls[0].signAndSubmit(signer, txOpts)
+        const res = await calls[0].signAndSubmit(signer, (assertSafeFeeAsset(txOpts), withSignedExtOverride(txOpts)))
         const txHash = extractTxHash(res)
         if (txHash) submitted.push({ txHash, chain: params.source })
         state = { step: 'success', submitted }
@@ -1468,7 +1563,7 @@ export async function executeDonate(
     for (let i = 0; i < calls.length; i++) {
       state = { step: 'executing', mode: 'sequential', current: i, total: calls.length }
       try {
-        const res = await calls[i].signAndSubmit(signer, txOpts)
+        const res = await calls[i].signAndSubmit(signer, (assertSafeFeeAsset(txOpts), withSignedExtOverride(txOpts)))
         const txHash = extractTxHash(res)
         if (txHash) submitted.push({ txHash, chain: params.source })
       } catch (err) {

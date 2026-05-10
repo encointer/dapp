@@ -45,6 +45,40 @@ function loadPersisted(): PersistedWallet | null {
   return null
 }
 
+/** Wrap a PolkadotSigner so we log everything PAPI hands to the extension
+ *  before the signing popup opens. This lets us compare PAPI's SignerPayload
+ *  to what polkadot.js apps emits (which is known-good) and pinpoint why the
+ *  extension UI crashes on our calls. */
+function instrumentSigner(s: PolkadotSigner): PolkadotSigner {
+  const replacer = (_k: string, v: unknown): unknown => {
+    if (typeof v === 'bigint') return v.toString() + 'n'
+    if (v instanceof Uint8Array) return '0x' + Array.from(v).map(b => b.toString(16).padStart(2, '0')).join('')
+    return v
+  }
+  return new Proxy(s, {
+    get(target, prop, receiver) {
+      const orig = Reflect.get(target, prop, receiver) as unknown
+      if (typeof orig !== 'function') return orig
+      return (...args: unknown[]) => {
+        try {
+          console.log(`[signer] ${String(prop)} called with:`, JSON.stringify(args, replacer, 2))
+        } catch (err) {
+          console.warn(`[signer] ${String(prop)} args dump failed:`, err)
+        }
+        const result = (orig as (...a: unknown[]) => unknown).apply(target, args)
+        if (result instanceof Promise) {
+          return result.then(
+            r => { console.log(`[signer] ${String(prop)} resolved:`, r); return r },
+            e => { console.error(`[signer] ${String(prop)} rejected:`, e); throw e },
+          )
+        }
+        console.log(`[signer] ${String(prop)} returned:`, result)
+        return result
+      }
+    },
+  })
+}
+
 function updateSelectedAccount(accs: InjectedPolkadotAccount[], targetAddress?: string) {
   accounts = accs
   const target = targetAddress ?? address
@@ -52,11 +86,11 @@ function updateSelectedAccount(accs: InjectedPolkadotAccount[], targetAddress?: 
   if (found) {
     address = found.address
     accountName = found.name ?? null
-    signer = found.polkadotSigner
+    signer = instrumentSigner(found.polkadotSigner)
   } else if (accs.length > 0) {
     address = accs[0].address
     accountName = accs[0].name ?? null
-    signer = accs[0].polkadotSigner
+    signer = instrumentSigner(accs[0].polkadotSigner)
   } else {
     address = null
     accountName = null
@@ -98,7 +132,7 @@ export function selectAccount(addr: string) {
   if (found) {
     address = found.address
     accountName = found.name ?? null
-    signer = found.polkadotSigner
+    signer = instrumentSigner(found.polkadotSigner)
     persist()
   }
 }
