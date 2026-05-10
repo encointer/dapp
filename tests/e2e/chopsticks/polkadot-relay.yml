@@ -1,0 +1,8 @@
+endpoint:
+  - wss://rpc.polkadot.io
+  - wss://polkadot-rpc.dwellir.com
+port: 8200
+mock-signature-host: true
+build-block-mode: Instant
+db: ./.chopsticks-db/polkadot.sqlite
+allow-unresolved-imports: true

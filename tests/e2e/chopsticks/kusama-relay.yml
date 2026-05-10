@@ -1,0 +1,8 @@
+endpoint:
+  - wss://kusama-rpc.polkadot.io
+  - wss://kusama-rpc.dwellir.com
+port: 8100
+mock-signature-host: true
+build-block-mode: Instant
+db: ./.chopsticks-db/kusama.sqlite
+allow-unresolved-imports: true

@@ -1,0 +1,49 @@
+name: nightly-e2e
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  schedule:
+    - cron: '0 3 * * *'  # 03:00 UTC daily
+  workflow_dispatch:     # manual trigger from the Actions tab
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22  # chopsticks requires node ≥22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Type-check
+        run: pnpm check
+
+      - name: Run e2e suite
+        run: pnpm test:e2e
+        env:
+          # Set DEBUG_CHOPSTICKS=1 for verbose chopsticks output if a future
+          # CI run regresses; off by default to keep the log readable.
+          DEBUG_CHOPSTICKS: ''
+
+      - name: Upload chopsticks DBs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: chopsticks-dbs
+          path: tests/e2e/chopsticks/.chopsticks-db/
+          if-no-files-found: ignore
+          retention-days: 7

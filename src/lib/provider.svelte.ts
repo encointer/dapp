@@ -51,11 +51,23 @@ async function createSmoldotClients(): Promise<Clients> {
   }
 }
 
+/** Per-chain RPC URL overrides. Used by the e2e test harness to point the
+ *  dapp at chopsticks-spawned WS endpoints instead of production RPCs. */
+let rpcOverrides: Partial<Record<ChainId, string>> | null = null
+
+export function setRpcOverrides(overrides: Partial<Record<ChainId, string>> | null) {
+  rpcOverrides = overrides
+}
+
+function rpcEndpointFor(chain: ChainId): string {
+  return rpcOverrides?.[chain] ?? CHAINS[chain].rpcEndpoints[0]
+}
+
 function createRpcClients(): Clients {
   return {
-    encointer: createClient(getWsProvider(CHAINS.encointer.rpcEndpoints[0])),
-    kah: createClient(getWsProvider(CHAINS.kah.rpcEndpoints[0])),
-    pah: createClient(getWsProvider(CHAINS.pah.rpcEndpoints[0])),
+    encointer: createClient(getWsProvider(rpcEndpointFor('encointer'))),
+    kah: createClient(getWsProvider(rpcEndpointFor('kah'))),
+    pah: createClient(getWsProvider(rpcEndpointFor('pah'))),
   }
 }
 

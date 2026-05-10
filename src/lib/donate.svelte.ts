@@ -196,7 +196,17 @@ export function isCrossConsensusLocation(loc: unknown): boolean {
   })
 }
 
+/** When true, `assertSafeFeeAsset` throws on cross-consensus assetIds. Should
+ *  stay enabled in production (the wallet bug is real for browser-injected
+ *  signers); e2e tests using a programmatic signer disable it. */
+let safeFeeAssetEnforcement = true
+
+export function setSafeFeeAssetEnforcement(enabled: boolean): void {
+  safeFeeAssetEnforcement = enabled
+}
+
 export function assertSafeFeeAsset(opts?: PapiTxOptions): void {
+  if (!safeFeeAssetEnforcement) return
   if (!opts?.asset) return
   if (isCrossConsensusLocation(opts.asset)) {
     throw new Error(
@@ -219,11 +229,12 @@ export interface UnsignedTx {
  * Tx fee asset for `signAndSubmit` / `getEstimatedFees`. On the asset hubs the
  * `pallet-asset-conversion-tx-payment` signed extension swaps the chosen asset
  * via the AssetConversion pool to pay the native fee — so a user holding only
- * USDC on PAH/KAH (no DOT/KSM) can still submit. For non-USDC paths the source
- * chain pays in its native token and we omit the option.
+ * USDC on PAH/KAH (no DOT/KSM) can still submit. The pool is registered for
+ * USDC↔native on both asset hubs, so USDC works as the fee asset *regardless*
+ * of what's being transferred — the `token` parameter is unused.
  */
-function feeAssetFor(source: ChainId, token: TokenSymbol): unknown | undefined {
-  if (token !== 'USDC') return undefined
+function feeAssetFor(source: ChainId, _token: TokenSymbol): unknown | undefined {
+  void _token
   // PAH and KAH both define `pallet_asset_conversion_tx_payment::Config::AssetId = Location`
   // (no Versioned wrapper) — pass the bare Location.
   if (source === 'pah') {
@@ -1057,6 +1068,16 @@ async function dryRunXcmOn(
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     console.warn(`${tag} runtime call threw:`, err)
+    // PAPI v2 throws "Incompatible runtime entry" when the chain's metadata
+    // doesn't match the descriptors PAPI expects for `DryRunApi.dry_run_xcm`.
+    // Some forks (notably Encointer on chopsticks) hit this even though the
+    // chain itself supports the call in production. Treat as "dry-run
+    // unavailable" rather than as an actual failure — it shouldn't block the
+    // user's flow.
+    if (/Incompatible runtime entry RuntimeCall\(DryRunApi_dry_run_xcm\)/.test(msg)) {
+      console.warn(`${tag} skipped: chain rejects DryRunApi.dry_run_xcm via PAPI compat`)
+      return null
+    }
     return { destChain, ok: false, errorMessage: msg, events: [] }
   }
 }

@@ -1,0 +1,8 @@
+endpoint:
+  - wss://polkadot-asset-hub-rpc.polkadot.io
+  - wss://sys.ibp.network/statemint
+port: 8201
+mock-signature-host: true
+build-block-mode: Instant
+db: ./.chopsticks-db/pah.sqlite
+allow-unresolved-imports: true
