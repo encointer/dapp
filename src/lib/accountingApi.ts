@@ -70,6 +70,41 @@ export async function getCurrentReputables(cid: string): Promise<number | null> 
   }
 }
 
+export interface LeaderboardDonor {
+  ss58: string
+  count: number
+  /** Bigint as string (planck-level, before applying decimals). */
+  totalRaw: string
+}
+export interface LeaderboardUnidentified {
+  timestamp: number
+  amountRaw: string
+}
+export interface AggregateLeaderboard {
+  token: 'USDC' | 'KSM'
+  decimals: number
+  totalInflowsRaw: string
+  totalOutflowsRaw: string
+  donors: LeaderboardDonor[]
+  crossChainUnidentified: LeaderboardUnidentified[]
+}
+
+/** Aggregate donor leaderboard for the given token across every recipient
+ *  (USDC across treasuries, KSM across faucets). */
+export async function getAggregateLeaderboard(token: 'USDC' | 'KSM'): Promise<AggregateLeaderboard | null> {
+  try {
+    const res = await fetch(`${API_URL}/leaderboard?token=${token}`, { credentials: 'omit' })
+    if (!res.ok) {
+      console.warn(`[accounting] leaderboard ${token} → ${res.status}`)
+      return null
+    }
+    return await res.json() as AggregateLeaderboard
+  } catch (err) {
+    console.warn(`[accounting] leaderboard ${token} fetch failed`, err)
+    return null
+  }
+}
+
 /**
  * Sum the community-currency volume across the last `n` full calendar months.
  * Returns null on any fetch failure (treated as "no data").

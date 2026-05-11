@@ -32,7 +32,12 @@
   } from '../lib/donate.svelte'
   import RecipientCard from '../components/RecipientCard.svelte'
   import AmountInput from '../components/AmountInput.svelte'
+  import LeaderboardCard from '../components/LeaderboardCard.svelte'
   import { parseDonateUrlParams } from '../lib/donateUrl'
+  import {
+    getAggregateLeaderboard,
+    type AggregateLeaderboard,
+  } from '../lib/accountingApi'
 
   // URL param prefill (asset/source/amount/recipients). Recipient ids resolve
   // once the recipients data is loaded. Each value is consumed once: setting
@@ -324,6 +329,41 @@
     clearSelection()
     amountStr = ''
   }
+
+  // One aggregate leaderboard per token, fetched lazily once recipients load.
+  // `undefined` = not yet requested, `null` = fetch failed, value = loaded.
+  let boards = $state<Record<TokenSymbol, AggregateLeaderboard | null | undefined>>({
+    USDC: undefined, KSM: undefined, DOT: null,
+  })
+
+  $effect(() => {
+    if (recipients.length === 0) return
+    if (token !== 'USDC' && token !== 'KSM') return
+    if (boards[token] !== undefined) return
+    getAggregateLeaderboard(token).then(b => {
+      boards = { ...boards, [token]: b }
+    })
+  })
+
+  /** Sum of current on-chain balances across all visible recipients of the
+   *  active token — pairs with the leaderboard's cumulative-inflow line. */
+  const totalCurrentBalance = $derived.by<bigint | null>(() => {
+    if (token === 'USDC') {
+      // null while any treasury balance is still loading (avoid showing a
+      // misleadingly-low total while balances stream in)
+      let sum = 0n
+      for (const t of treasuries) {
+        if (!t.kahAccount) continue
+        sum += t.usdcBalance ?? 0n
+      }
+      return sum
+    } else if (token === 'KSM') {
+      let sum = 0n
+      for (const f of faucets) sum += f.freeBalance ?? 0n
+      return sum
+    }
+    return null
+  })
 </script>
 
 <div class="donate">
@@ -691,6 +731,22 @@
       </div>
     </section>
   {/if}
+
+  {#if token === 'USDC' || token === 'KSM'}
+    {@const board = boards[token]}
+    {#if board === undefined}
+      <section class="card leaderboard-loading">
+        <span class="spinner"></span>
+        <span class="dim-text">Loading top supporters...</span>
+      </section>
+    {:else if board}
+      <LeaderboardCard
+        board={board}
+        currentBalance={totalCurrentBalance}
+        title={token === 'USDC' ? 'Top supporters · community treasuries' : 'Top supporters · KSM faucets'}
+      />
+    {/if}
+  {/if}
 </div>
 
 <style>
@@ -1042,6 +1098,15 @@
     flex-direction: column;
     align-items: center;
     gap: 0.75rem;
+  }
+
+  .leaderboard-loading {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.75rem 1rem;
+    font-size: 0.88rem;
   }
 
   .success-card {
