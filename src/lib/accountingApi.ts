@@ -70,6 +70,65 @@ export async function getCurrentReputables(cid: string): Promise<number | null> 
   }
 }
 
+export interface LeaderboardDonor {
+  ss58: string
+  count: number
+  /** Bigint as string (planck-level, before applying decimals). */
+  totalRaw: string
+}
+export interface LeaderboardAnonymous {
+  timestamp: number
+  amountRaw: string
+}
+export interface TreasuryLeaderboard {
+  recipient: { name: string; cid: string; kahAccount: string; encointerAccount: string }
+  token: 'USDC'
+  decimals: number
+  totalInflowsRaw: string
+  totalOutflowsRaw: string
+  donors: LeaderboardDonor[]
+  crossChainAnonymous: LeaderboardAnonymous[]
+}
+export interface FaucetLeaderboard {
+  recipient: { name: string; account: string }
+  token: 'KSM'
+  decimals: number
+  totalInflowsRaw: string
+  totalOutflowsRaw: string
+  donors: LeaderboardDonor[]
+  crossChainAnonymous: LeaderboardAnonymous[]
+  createdAtBlock?: number
+}
+
+export async function getTreasuryLeaderboard(cid: string): Promise<TreasuryLeaderboard | null> {
+  try {
+    const res = await fetch(`${API_URL}/leaderboard/${encodeURIComponent(cid)}?token=USDC`, { credentials: 'omit' })
+    if (!res.ok) {
+      console.warn(`[accounting] leaderboard ${cid} → ${res.status}`)
+      return null
+    }
+    return await res.json() as TreasuryLeaderboard
+  } catch (err) {
+    console.warn(`[accounting] leaderboard ${cid} fetch failed`, err)
+    return null
+  }
+}
+
+export async function getFaucetLeaderboards(): Promise<FaucetLeaderboard[] | null> {
+  try {
+    const res = await fetch(`${API_URL}/leaderboard/faucets/all`, { credentials: 'omit' })
+    if (!res.ok) {
+      console.warn(`[accounting] faucet leaderboards → ${res.status}`)
+      return null
+    }
+    const body = await res.json() as { faucets: FaucetLeaderboard[] }
+    return body.faucets ?? []
+  } catch (err) {
+    console.warn('[accounting] faucet leaderboards fetch failed', err)
+    return null
+  }
+}
+
 /**
  * Sum the community-currency volume across the last `n` full calendar months.
  * Returns null on any fetch failure (treated as "no data").

@@ -32,7 +32,14 @@
   } from '../lib/donate.svelte'
   import RecipientCard from '../components/RecipientCard.svelte'
   import AmountInput from '../components/AmountInput.svelte'
+  import LeaderboardCard from '../components/LeaderboardCard.svelte'
   import { parseDonateUrlParams } from '../lib/donateUrl'
+  import {
+    getTreasuryLeaderboard,
+    getFaucetLeaderboards,
+    type TreasuryLeaderboard,
+    type FaucetLeaderboard,
+  } from '../lib/accountingApi'
 
   // URL param prefill (asset/source/amount/recipients). Recipient ids resolve
   // once the recipients data is loaded. Each value is consumed once: setting
@@ -323,6 +330,37 @@
     resetDonate()
     clearSelection()
     amountStr = ''
+  }
+
+  // Leaderboards: fetched lazily once recipients are loaded.
+  // Treasuries keyed by cid; faucet leaderboards keyed by account.
+  let treasuryBoards = $state<Record<string, TreasuryLeaderboard | null>>({})
+  let faucetBoards = $state<FaucetLeaderboard[] | null>(null)
+  let boardsRequestedForToken = $state<TokenSymbol | null>(null)
+
+  $effect(() => {
+    if (recipients.length === 0) return
+    if (boardsRequestedForToken === token) return
+    boardsRequestedForToken = token
+    if (token === 'USDC') {
+      for (const t of treasuries) {
+        if (!t.cid || t.cid in treasuryBoards) continue
+        getTreasuryLeaderboard(t.cid).then(b => {
+          treasuryBoards = { ...treasuryBoards, [t.cid]: b }
+        })
+      }
+    } else {
+      if (faucetBoards === null) {
+        getFaucetLeaderboards().then(b => {
+          faucetBoards = b ?? []
+        })
+      }
+    }
+  })
+
+  function faucetBoardFor(account: string): FaucetLeaderboard | null {
+    if (!faucetBoards) return null
+    return faucetBoards.find(b => b.recipient.account === account) ?? null
   }
 </script>
 
@@ -691,6 +729,34 @@
       </div>
     </section>
   {/if}
+
+  {#if token === 'USDC'}
+    {#each treasuries.filter(t => !!t.kahAccount) as t (t.cid)}
+      {@const board = treasuryBoards[t.cid]}
+      {#if board === undefined}
+        <section class="card leaderboard-loading">
+          <span class="spinner"></span>
+          <span class="dim-text">Loading top supporters · {t.name}...</span>
+        </section>
+      {:else if board}
+        <LeaderboardCard board={board} currentBalance={t.usdcBalance} title={t.name} />
+      {/if}
+    {/each}
+  {:else}
+    {#if faucetBoards === null && faucets.length > 0}
+      <section class="card leaderboard-loading">
+        <span class="spinner"></span>
+        <span class="dim-text">Loading top supporters...</span>
+      </section>
+    {:else}
+      {#each faucets as f (f.account)}
+        {@const board = faucetBoardFor(f.account)}
+        {#if board}
+          <LeaderboardCard board={board} currentBalance={f.freeBalance} title={f.name ?? f.account} />
+        {/if}
+      {/each}
+    {/if}
+  {/if}
 </div>
 
 <style>
@@ -1042,6 +1108,15 @@
     flex-direction: column;
     align-items: center;
     gap: 0.75rem;
+  }
+
+  .leaderboard-loading {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.75rem 1rem;
+    font-size: 0.88rem;
   }
 
   .success-card {
