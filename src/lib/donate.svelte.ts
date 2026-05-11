@@ -208,15 +208,19 @@ let safeFeeAssetEnforcement = true
  *    mis-decodes the inner V5 Junction and crashes the signing popup. See
  *    https://github.com/polkadot-js/extension/issues/1618 and the matching
  *    SubWallet issue.
- *  - **talisman**: the extension's fee-estimation pre-flight calls
- *    `TransactionPaymentApi.query_info` with the cross-consensus assetId and
- *    the asset hub runtime panics inside it (`wasm unreachable`), so the
- *    signing popup never opens.
+ *  - **talisman**, **nova-wallet**: the extension's fee-estimation
+ *    pre-flight calls `TransactionPaymentApi.query_info` with the
+ *    cross-consensus assetId and the asset hub runtime panics inside it
+ *    (`wasm unreachable`), so the signing popup never opens.
  *
- *  Other wallets (Nova, Enkrypt, …) remain *unknown* — we don't preemptively
- *  block them, so users can confirm and we can add them here if reports
- *  arrive. */
-export const KNOWN_FEE_ASSET_CRASH_WALLETS = new Set<string>(['polkadot-js', 'subwallet-js', 'talisman'])
+ *  Other wallets (Enkrypt, …) remain *unknown* — we don't preemptively block
+ *  them, so users can confirm and we can add them here if reports arrive. */
+export const KNOWN_FEE_ASSET_CRASH_WALLETS = new Set<string>([
+  'polkadot-js',
+  'subwallet-js',
+  'talisman',
+  'nova-wallet',
+])
 
 /** Active wallet's injected-extension identifier (e.g. `polkadot-js`).
  *  `null` when no wallet connected or in a test/programmatic context. */
@@ -241,7 +245,7 @@ export function assertSafeFeeAsset(opts?: PapiTxOptions): void {
       '`ChargeAssetTxPayment.assetId`. ' +
       'Top up the source chain\'s native token (e.g. KSM on Asset Hub Kusama) ' +
       'so the dispatch fee can be paid in the native asset, or try a ' +
-      'wallet not on the known-affected list (Nova, Enkrypt, …).',
+      'different wallet that\'s not yet on the known-affected list.',
     )
   }
 }
