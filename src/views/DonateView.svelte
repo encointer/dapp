@@ -35,10 +35,8 @@
   import LeaderboardCard from '../components/LeaderboardCard.svelte'
   import { parseDonateUrlParams } from '../lib/donateUrl'
   import {
-    getTreasuryLeaderboard,
-    getFaucetLeaderboards,
-    type TreasuryLeaderboard,
-    type FaucetLeaderboard,
+    getAggregateLeaderboard,
+    type AggregateLeaderboard,
   } from '../lib/accountingApi'
 
   // URL param prefill (asset/source/amount/recipients). Recipient ids resolve
@@ -332,36 +330,40 @@
     amountStr = ''
   }
 
-  // Leaderboards: fetched lazily once recipients are loaded.
-  // Treasuries keyed by cid; faucet leaderboards keyed by account.
-  let treasuryBoards = $state<Record<string, TreasuryLeaderboard | null>>({})
-  let faucetBoards = $state<FaucetLeaderboard[] | null>(null)
-  let boardsRequestedForToken = $state<TokenSymbol | null>(null)
+  // One aggregate leaderboard per token, fetched lazily once recipients load.
+  // `undefined` = not yet requested, `null` = fetch failed, value = loaded.
+  let boards = $state<Record<TokenSymbol, AggregateLeaderboard | null | undefined>>({
+    USDC: undefined, KSM: undefined, DOT: null,
+  })
 
   $effect(() => {
     if (recipients.length === 0) return
-    if (boardsRequestedForToken === token) return
-    boardsRequestedForToken = token
-    if (token === 'USDC') {
-      for (const t of treasuries) {
-        if (!t.cid || t.cid in treasuryBoards) continue
-        getTreasuryLeaderboard(t.cid).then(b => {
-          treasuryBoards = { ...treasuryBoards, [t.cid]: b }
-        })
-      }
-    } else {
-      if (faucetBoards === null) {
-        getFaucetLeaderboards().then(b => {
-          faucetBoards = b ?? []
-        })
-      }
-    }
+    if (token !== 'USDC' && token !== 'KSM') return
+    if (boards[token] !== undefined) return
+    getAggregateLeaderboard(token).then(b => {
+      boards = { ...boards, [token]: b }
+    })
   })
 
-  function faucetBoardFor(account: string): FaucetLeaderboard | null {
-    if (!faucetBoards) return null
-    return faucetBoards.find(b => b.recipient.account === account) ?? null
-  }
+  /** Sum of current on-chain balances across all visible recipients of the
+   *  active token — pairs with the leaderboard's cumulative-inflow line. */
+  const totalCurrentBalance = $derived.by<bigint | null>(() => {
+    if (token === 'USDC') {
+      // null while any treasury balance is still loading (avoid showing a
+      // misleadingly-low total while balances stream in)
+      let sum = 0n
+      for (const t of treasuries) {
+        if (!t.kahAccount) continue
+        sum += t.usdcBalance ?? 0n
+      }
+      return sum
+    } else if (token === 'KSM') {
+      let sum = 0n
+      for (const f of faucets) sum += f.freeBalance ?? 0n
+      return sum
+    }
+    return null
+  })
 </script>
 
 <div class="donate">
@@ -730,31 +732,19 @@
     </section>
   {/if}
 
-  {#if token === 'USDC'}
-    {#each treasuries.filter(t => !!t.kahAccount) as t (t.cid)}
-      {@const board = treasuryBoards[t.cid]}
-      {#if board === undefined}
-        <section class="card leaderboard-loading">
-          <span class="spinner"></span>
-          <span class="dim-text">Loading top supporters · {t.name}...</span>
-        </section>
-      {:else if board}
-        <LeaderboardCard board={board} currentBalance={t.usdcBalance} title={t.name} />
-      {/if}
-    {/each}
-  {:else}
-    {#if faucetBoards === null && faucets.length > 0}
+  {#if token === 'USDC' || token === 'KSM'}
+    {@const board = boards[token]}
+    {#if board === undefined}
       <section class="card leaderboard-loading">
         <span class="spinner"></span>
         <span class="dim-text">Loading top supporters...</span>
       </section>
-    {:else}
-      {#each faucets as f (f.account)}
-        {@const board = faucetBoardFor(f.account)}
-        {#if board}
-          <LeaderboardCard board={board} currentBalance={f.freeBalance} title={f.name ?? f.account} />
-        {/if}
-      {/each}
+    {:else if board}
+      <LeaderboardCard
+        board={board}
+        currentBalance={totalCurrentBalance}
+        title={token === 'USDC' ? 'Top supporters · community treasuries' : 'Top supporters · KSM faucets'}
+      />
     {/if}
   {/if}
 </div>

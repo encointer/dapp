@@ -82,19 +82,49 @@ function dataToString(d: unknown): string | null {
   return null
 }
 
+interface IdentityApi {
+  query: {
+    Identity: {
+      IdentityOf: { getValue: (a: string) => Promise<unknown> }
+      SuperOf: { getValue: (a: string) => Promise<unknown> }
+    }
+  }
+}
+
+async function readDisplay(api: IdentityApi, ss58: string): Promise<string | null> {
+  const raw = await api.query.Identity.IdentityOf.getValue(ss58)
+  if (!raw) return null
+  // Newer pallets return Option<(Registration, Option<Username>)>; older
+  // return Option<Registration>.
+  const reg = Array.isArray(raw) ? raw[0] : raw
+  const info = (reg as { info?: { display?: unknown } })?.info
+  return dataToString(info?.display)
+}
+
 async function queryOne(client: PolkadotClient, ss58: string): Promise<string | null> {
   try {
-    // Untyped query: people-chain Identity pallet's IdentityOf storage.
-    // Newer pallets return Option<(Registration, Option<Username>)>; older
-    // return Option<Registration>. Handle both shapes.
-    const api = client.getUnsafeApi() as unknown as {
-      query: { Identity: { IdentityOf: { getValue: (a: string) => Promise<unknown> } } }
+    const api = client.getUnsafeApi() as unknown as IdentityApi
+    const direct = await readDisplay(api, ss58)
+    if (direct) return direct
+
+    // Fall back to sub-identity lookup. SuperOf returns Option<(parent, sub-name)>;
+    // polkadot-api decodes the tuple as [parentSs58, Data].
+    const sup = await api.query.Identity.SuperOf.getValue(ss58)
+    if (!sup) return null
+    const tuple = sup as [string, unknown] | { parent?: string; name?: unknown } | undefined
+    let parent: string | undefined
+    let subData: unknown
+    if (Array.isArray(tuple)) {
+      [parent, subData] = tuple
+    } else if (tuple && typeof tuple === 'object') {
+      parent = tuple.parent
+      subData = tuple.name
     }
-    const raw = await api.query.Identity.IdentityOf.getValue(ss58)
-    if (!raw) return null
-    const reg = Array.isArray(raw) ? raw[0] : raw
-    const info = (reg as { info?: { display?: unknown } })?.info
-    return dataToString(info?.display)
+    if (!parent) return null
+    const subName = dataToString(subData)
+    const superDisplay = await readDisplay(api, parent)
+    if (!superDisplay) return subName // sub with no super display — fall back to just the sub name
+    return subName ? `${superDisplay}/${subName}` : superDisplay
   } catch (err) {
     console.warn('[identity] query failed for', ss58, err)
     return null
