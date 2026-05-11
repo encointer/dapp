@@ -196,10 +196,35 @@ export function isCrossConsensusLocation(loc: unknown): boolean {
   })
 }
 
-/** When true, `assertSafeFeeAsset` throws on cross-consensus assetIds. Should
- *  stay enabled in production (the wallet bug is real for browser-injected
- *  signers); e2e tests using a programmatic signer disable it. */
+/** When true, `assertSafeFeeAsset` throws on cross-consensus assetIds — but
+ *  only for wallets known to crash on them (see `KNOWN_FEE_ASSET_CRASH_WALLETS`).
+ *  Stays enabled in production; the e2e tests (programmatic signer) disable
+ *  it entirely. */
 let safeFeeAssetEnforcement = true
+
+/** Browser extensions that can't handle a V5 cross-consensus Location as
+ *  `ChargeAssetTxPayment.assetId`. Failure modes differ:
+ *  - **polkadot-js**, **subwallet-js**: bundled `@polkadot/types-known`
+ *    mis-decodes the inner V5 Junction and crashes the signing popup. See
+ *    https://github.com/polkadot-js/extension/issues/1618 and the matching
+ *    SubWallet issue.
+ *  - **talisman**: the extension's fee-estimation pre-flight calls
+ *    `TransactionPaymentApi.query_info` with the cross-consensus assetId and
+ *    the asset hub runtime panics inside it (`wasm unreachable`), so the
+ *    signing popup never opens.
+ *
+ *  Other wallets (Nova, Enkrypt, …) remain *unknown* — we don't preemptively
+ *  block them, so users can confirm and we can add them here if reports
+ *  arrive. */
+export const KNOWN_FEE_ASSET_CRASH_WALLETS = new Set<string>(['polkadot-js', 'subwallet-js', 'talisman'])
+
+/** Active wallet's injected-extension identifier (e.g. `polkadot-js`).
+ *  `null` when no wallet connected or in a test/programmatic context. */
+let activeWalletId: string | null = null
+
+export function setActiveWalletId(id: string | null): void {
+  activeWalletId = id
+}
 
 export function setSafeFeeAssetEnforcement(enabled: boolean): void {
   safeFeeAssetEnforcement = enabled
@@ -208,13 +233,15 @@ export function setSafeFeeAssetEnforcement(enabled: boolean): void {
 export function assertSafeFeeAsset(opts?: PapiTxOptions): void {
   if (!safeFeeAssetEnforcement) return
   if (!opts?.asset) return
+  if (!activeWalletId || !KNOWN_FEE_ASSET_CRASH_WALLETS.has(activeWalletId)) return
   if (isCrossConsensusLocation(opts.asset)) {
     throw new Error(
-      'Cannot pay fees with a bridged asset (cross-consensus Location). ' +
-      'The polkadot-js / SubWallet extensions crash trying to decode this ' +
-      'shape in `ChargeAssetTxPayment.assetId`. Top up the source chain\'s ' +
-      'native token (e.g. KSM on Asset Hub Kusama) so the dispatch fee can ' +
-      'be paid in the native asset, or use a different wallet.',
+      `Cannot pay fees with a bridged asset (cross-consensus Location) in ${activeWalletId}: ` +
+      'this wallet rejects or crashes on this shape in ' +
+      '`ChargeAssetTxPayment.assetId`. ' +
+      'Top up the source chain\'s native token (e.g. KSM on Asset Hub Kusama) ' +
+      'so the dispatch fee can be paid in the native asset, or try a ' +
+      'wallet not on the known-affected list (Nova, Enkrypt, …).',
     )
   }
 }

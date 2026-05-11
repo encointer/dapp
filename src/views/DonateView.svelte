@@ -529,11 +529,6 @@
         <div><span class="dim-text">Mode:</span> {txState.mode === 'batch' ? 'single batched signature' : `${selectedRecipients.length} signatures`}</div>
         <div>
           <span class="dim-text">Estimated fee:</span> {formatBalance(txState.fee, txState.feeDecimals)} {txState.feeSymbol}
-          {#if txState.feeNative !== undefined && txState.feeNativeSymbol && txState.feeNativeDecimals !== undefined}
-            <span class="dim-text">
-              (≈ {formatBalance(txState.feeNative, txState.feeNativeDecimals)} {txState.feeNativeSymbol} swapped via AssetConversion)
-            </span>
-          {/if}
         </div>
         {#if txState.dryRun}
           <div class="dry-run-summary">
@@ -552,25 +547,41 @@
         {/if}
         {#if txState.dryRun?.balance}
           {@const bal = txState.dryRun.balance}
-          {@const usdcOut = bal.sourceUsdcDelta < 0n ? -bal.sourceUsdcDelta : 0n}
+          {@const usdcOutDryRun = bal.sourceUsdcDelta < 0n ? -bal.sourceUsdcDelta : 0n}
+          {@const feePaidInUsdc = txState.feeSymbol === 'USDC' ? txState.fee : 0n}
+          <!--
+            `dry_run_call` doesn't run signed extensions, so the
+            asset-conversion-tx-payment USDC withdrawal isn't reflected in
+            `sourceUsdcDelta`. Add the estimated USDC fee so the user sees the
+            real total debited from their account.
+          -->
+          {@const usdcOut = usdcOutDryRun + feePaidInUsdc}
           {@const nativeDecimals = source === 'pah' ? 10 : 12}
           {@const nativeSymbol = source === 'pah' ? 'DOT' : 'KSM'}
           {@const nativeAbs = bal.sourceNativeDelta < 0n ? -bal.sourceNativeDelta : bal.sourceNativeDelta}
           {@const nativeSign = bal.sourceNativeDelta < 0n ? '−' : '+'}
+          {@const showNativeLine = bal.sourceNativeDelta !== 0n || (bal.sourceNativeFinal !== null && bal.sourceNativeFinal !== 0n)}
           <div class="net-effect">
             <span class="dim-text">Net effect:</span>
             <ul>
               <li>
                 <span class="dim-text">USDC charged from your account:</span>
                 <span class="mono">{formatBalance(usdcOut, 6)} USDC</span>
-              </li>
-              <li>
-                <span class="dim-text">{nativeSymbol} change:</span>
-                <span class="mono">{nativeSign}{formatBalance(nativeAbs, nativeDecimals)} {nativeSymbol}</span>
-                {#if bal.sourceNativeFinal !== null}
-                  <span class="dim-text">→ remaining {formatBalance(bal.sourceNativeFinal < 0n ? 0n : bal.sourceNativeFinal, nativeDecimals)} {nativeSymbol}</span>
+                {#if feePaidInUsdc > 0n}
+                  <span class="dim-text">
+                    ({formatBalance(usdcOutDryRun, 6)} donation + {formatBalance(feePaidInUsdc, 6)} fee)
+                  </span>
                 {/if}
               </li>
+              {#if showNativeLine}
+                <li>
+                  <span class="dim-text">{nativeSymbol} change:</span>
+                  <span class="mono">{nativeSign}{formatBalance(nativeAbs, nativeDecimals)} {nativeSymbol}</span>
+                  {#if bal.sourceNativeFinal !== null}
+                    <span class="dim-text">→ remaining {formatBalance(bal.sourceNativeFinal < 0n ? 0n : bal.sourceNativeFinal, nativeDecimals)} {nativeSymbol}</span>
+                  {/if}
+                </li>
+              {/if}
               <li>
                 <span class="dim-text">Recipients receive:</span>
                 <ul class="recipient-receipts">

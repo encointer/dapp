@@ -142,25 +142,44 @@
           </ul>
           {#if dr.balance}
             {@const bal = dr.balance}
-            {@const usdcOut = bal.sourceUsdcDelta < 0n ? -bal.sourceUsdcDelta : 0n}
+            {@const usdcOutDryRun = bal.sourceUsdcDelta < 0n ? -bal.sourceUsdcDelta : 0n}
+            <!--
+              `dry_run_call` doesn't run the asset-conversion-tx-payment
+              signed extension, so when fees are paid in USDC the
+              withdrawal isn't in `sourceUsdcDelta`. Pull the USDC fee
+              from the hop's `fees[i].origin.quoted` if present, and add
+              it so the total reflects what really leaves the account.
+            -->
+            {@const feeUsdc = fees?.[i]?.origin.quoted?.symbol === 'USDC' ? (fees?.[i]?.origin.quoted?.fee ?? 0n) : 0n}
+            {@const usdcOut = usdcOutDryRun + feeUsdc}
             {@const nativeDecimals = hop?.from === 'pah' ? 10 : 12}
             {@const nativeSymbol = hop?.from === 'pah' ? 'DOT' : 'KSM'}
             {@const nativeAbs = bal.sourceNativeDelta < 0n ? -bal.sourceNativeDelta : bal.sourceNativeDelta}
             {@const nativeSign = bal.sourceNativeDelta < 0n ? '−' : '+'}
+            {@const showNativeLine = bal.sourceNativeDelta !== 0n || (bal.sourceNativeFinal !== null && bal.sourceNativeFinal !== 0n)}
             <ul class="net-effect">
               {#if usdcOut > 0n}
                 <li>
                   <span class="dim-text">USDC charged from your account:</span>
                   <span class="mono">{formatBalance(usdcOut, 6)} USDC</span>
+                  {#if feeUsdc > 0n && usdcOutDryRun > 0n}
+                    <span class="dim-text">
+                      ({formatBalance(usdcOutDryRun, 6)} transfer + {formatBalance(feeUsdc, 6)} fee)
+                    </span>
+                  {:else if feeUsdc > 0n}
+                    <span class="dim-text">(fee)</span>
+                  {/if}
                 </li>
               {/if}
-              <li>
-                <span class="dim-text">{nativeSymbol} change:</span>
-                <span class="mono">{nativeSign}{formatBalance(nativeAbs, nativeDecimals)} {nativeSymbol}</span>
-                {#if bal.sourceNativeFinal !== null}
-                  <span class="dim-text">→ remaining {formatBalance(bal.sourceNativeFinal < 0n ? 0n : bal.sourceNativeFinal, nativeDecimals)} {nativeSymbol}</span>
-                {/if}
-              </li>
+              {#if showNativeLine}
+                <li>
+                  <span class="dim-text">{nativeSymbol} change:</span>
+                  <span class="mono">{nativeSign}{formatBalance(nativeAbs, nativeDecimals)} {nativeSymbol}</span>
+                  {#if bal.sourceNativeFinal !== null}
+                    <span class="dim-text">→ remaining {formatBalance(bal.sourceNativeFinal < 0n ? 0n : bal.sourceNativeFinal, nativeDecimals)} {nativeSymbol}</span>
+                  {/if}
+                </li>
+              {/if}
               {#if bal.recipientReceipts.length > 0 && bal.recipientReceipts[0].received > 0n}
                 {@const tokenDecimals = getDecimals(hop?.to ?? params.destination, params.token)}
                 <li>

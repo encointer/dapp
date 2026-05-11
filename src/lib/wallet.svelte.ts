@@ -5,6 +5,7 @@ import {
   type InjectedPolkadotAccount,
 } from 'polkadot-api/pjs-signer'
 import type { PolkadotSigner } from 'polkadot-api'
+import { setActiveWalletId } from './donate.svelte'
 
 const STORAGE_KEY = 'encointer-dapp-wallet'
 
@@ -77,6 +78,7 @@ export async function connectExtension(name: string, targetAddress?: string) {
   try {
     extension = await connectInjectedExtension(name)
     extensionName = name
+    setActiveWalletId(name)
     connected = true
 
     const accs = extension.getAccounts()
@@ -109,6 +111,7 @@ export function disconnect() {
   extension?.disconnect()
   extension = null
   extensionName = null
+  setActiveWalletId(null)
   address = null
   accountName = null
   signer = null
