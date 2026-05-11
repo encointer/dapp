@@ -42,7 +42,7 @@ export interface TransferParams {
   recipient: string
 }
 
-export type HopStatus = 'pending' | 'signing' | 'submitted' | 'success' | 'error'
+export type HopStatus = 'pending' | 'signing' | 'awaiting-inclusion' | 'submitted' | 'success' | 'error'
 
 export interface HopProgress {
   hop: Hop
@@ -64,6 +64,12 @@ export interface FeeDetail {
   symbol: string
   decimals: number
   quoted?: { fee: bigint; symbol: string; decimals: number }
+  /** Which asset the user actually pays this fee in. `'native'` — the
+   *  source chain's native token deducted via `ChargeTransactionPayment`.
+   *  `'asset'` — via `pallet_asset_conversion_tx_payment` with the
+   *  `quoted` asset (USDC in our setup). Defaults to `'native'` when
+   *  unspecified. */
+  paidIn?: 'native' | 'asset'
 }
 
 export interface HopFee {

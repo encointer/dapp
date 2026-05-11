@@ -33,7 +33,7 @@ export type DonateState =
       /** Pre-flight dry-run summary (source + per-destination). */
       dryRun?: DryRunSummary
     }
-  | { step: 'executing'; mode: 'batch' | 'sequential'; current: number; total: number }
+  | { step: 'executing'; mode: 'batch' | 'sequential'; current: number; total: number; phase: 'awaiting-signature' | 'awaiting-inclusion' }
   | { step: 'success'; submitted: SubmittedTx[] }
   | { step: 'error'; message: string }
 
@@ -152,6 +152,30 @@ export const SIGNED_EXT_OVERRIDE: NonNullable<PapiTxOptions['customSignedExtensi
     value: new Uint8Array([0]),       // Mode::Disabled
     additionalSigned: new Uint8Array([0]),  // Option::None for the metadata hash
   },
+}
+
+/** Wrap a `PolkadotSigner` so `onSigned` fires the moment the wallet returns
+ *  the signed bytes — i.e. between "waiting for signature in extension" and
+ *  "waiting for block inclusion". PAPI's `signAndSubmit` collapses both into
+ *  a single Promise so the UI otherwise has no way to distinguish them. */
+export function watchSigner(signer: PolkadotSigner, onSigned: () => void): PolkadotSigner {
+  return new Proxy(signer, {
+    get(target, prop, receiver) {
+      const orig = Reflect.get(target, prop, receiver) as unknown
+      if (prop !== 'signTx') return orig
+      return (...args: unknown[]) => {
+        const result = (orig as (...a: unknown[]) => unknown).apply(target, args)
+        if (result instanceof Promise) {
+          return result.then((value) => {
+            try { onSigned() } catch { /* swallow — phase is best-effort */ }
+            return value
+          })
+        }
+        try { onSigned() } catch { /* swallow */ }
+        return result
+      }
+    },
+  })
 }
 
 export function withSignedExtOverride(opts?: PapiTxOptions): PapiTxOptions {
@@ -1563,12 +1587,23 @@ export async function executeDonate(
       txOpts = decision.txOpts
     }
 
+    // Helper: flip the executing-state phase when the wallet returns the
+    // signed bytes (between "Sign in wallet" and "Awaiting block inclusion").
+    const onSigned = (mode: 'batch' | 'sequential', current: number, total: number) => () => {
+      if (state.step === 'executing') {
+        state = { step: 'executing', mode, current, total, phase: 'awaiting-inclusion' }
+      }
+    }
+
     if (calls.length > 1) {
       const batch = await buildBatch(params.source, calls)
       if (batch) {
-        state = { step: 'executing', mode: 'batch', current: 0, total: 1 }
+        state = { step: 'executing', mode: 'batch', current: 0, total: 1, phase: 'awaiting-signature' }
         try {
-          const res = await batch.signAndSubmit(signer, (assertSafeFeeAsset(txOpts), withSignedExtOverride(txOpts)))
+          const res = await batch.signAndSubmit(
+            watchSigner(signer, onSigned('batch', 0, 1)),
+            (assertSafeFeeAsset(txOpts), withSignedExtOverride(txOpts)),
+          )
           const txHash = extractTxHash(res)
           if (txHash) submitted.push({ txHash, chain: params.source })
           state = { step: 'success', submitted }
@@ -1583,9 +1618,12 @@ export async function executeDonate(
       }
     } else {
       // Single call (e.g. consolidated XCM, or single recipient).
-      state = { step: 'executing', mode: 'batch', current: 0, total: 1 }
+      state = { step: 'executing', mode: 'batch', current: 0, total: 1, phase: 'awaiting-signature' }
       try {
-        const res = await calls[0].signAndSubmit(signer, (assertSafeFeeAsset(txOpts), withSignedExtOverride(txOpts)))
+        const res = await calls[0].signAndSubmit(
+          watchSigner(signer, onSigned('batch', 0, 1)),
+          (assertSafeFeeAsset(txOpts), withSignedExtOverride(txOpts)),
+        )
         const txHash = extractTxHash(res)
         if (txHash) submitted.push({ txHash, chain: params.source })
         state = { step: 'success', submitted }
@@ -1602,9 +1640,12 @@ export async function executeDonate(
     }
 
     for (let i = 0; i < calls.length; i++) {
-      state = { step: 'executing', mode: 'sequential', current: i, total: calls.length }
+      state = { step: 'executing', mode: 'sequential', current: i, total: calls.length, phase: 'awaiting-signature' }
       try {
-        const res = await calls[i].signAndSubmit(signer, (assertSafeFeeAsset(txOpts), withSignedExtOverride(txOpts)))
+        const res = await calls[i].signAndSubmit(
+          watchSigner(signer, onSigned('sequential', i, calls.length)),
+          (assertSafeFeeAsset(txOpts), withSignedExtOverride(txOpts)),
+        )
         const txHash = extractTxHash(res)
         if (txHash) submitted.push({ txHash, chain: params.source })
       } catch (err) {

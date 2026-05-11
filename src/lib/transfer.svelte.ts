@@ -7,7 +7,7 @@ import { quoteUsdcForExactNative } from './forex'
 import { getApiOverrides, getClient } from './provider.svelte'
 import {
   decideFeeStrategy, dryRunFull, maybeWrapWithFeeSwap, sourceFeeAsset, fetchNativeBalance,
-  withSignedExtOverride, assertSafeFeeAsset,
+  withSignedExtOverride, assertSafeFeeAsset, watchSigner,
   type SrcApi, type UnsignedTx, type DryRunSummary, type PapiTxOptions,
 } from './donate.svelte'
 
@@ -224,15 +224,20 @@ export async function estimateFees(
       // Build the actual tx once and reuse for fee-estimate + dry-run.
       const built = await buildHopTx(hop, params.token, params.amount, senderAddress, params.recipient)
 
+      // Was the dispatch fee for this hop paid via the asset-conversion-tx-
+      // payment signed extension (USDC) or via native ChargeTransactionPayment?
+      const paidIn: 'native' | 'asset' = built.txOpts?.asset !== undefined ? 'asset' : 'native'
+
       if (hop.from === hop.to) {
         // Same-chain: no XCM fees — display the dispatch fee (in source-chain
         // native), pulled from `getEstimatedFees`.
         let dispatchFee = 0n
         try { dispatchFee = await built.tx.getEstimatedFees(senderAddress, built.txOpts) } catch { /* fall back to 0 */ }
         const meta = sourceFeeAsset(hop.from)
+        const origin = await enrichWithQuote({ fee: dispatchFee, symbol: meta.symbol, decimals: meta.decimals, paidIn })
         fees.push({
           hop,
-          origin: { fee: dispatchFee, symbol: meta.symbol, decimals: meta.decimals },
+          origin,
           destination: { fee: 0n, symbol: '', decimals: 12 },
         })
       } else {
@@ -246,7 +251,7 @@ export async function estimateFees(
           .sender(senderAddress)
           .getXcmFee()
         const [origin, destination] = await Promise.all([
-          enrichWithQuote(extractFee(feeResult.origin)),
+          enrichWithQuote({ ...extractFee(feeResult.origin), paidIn }),
           enrichWithQuote(extractFee(feeResult.destination)),
         ])
         fees.push({ hop, origin, destination })
@@ -307,7 +312,11 @@ export async function executeTransfer(
     try {
       const built = await buildHopTx(hop, params.token, params.amount, address, params.recipient)
       assertSafeFeeAsset(built.txOpts)
-      const res = await built.tx.signAndSubmit(signer, withSignedExtOverride(built.txOpts))
+      const wrapped = watchSigner(signer, () => {
+        hopProgresses[i] = { ...hopProgresses[i], status: 'awaiting-inclusion' }
+        transferState = { step: 'executing', hops: [...hopProgresses] }
+      })
+      const res = await built.tx.signAndSubmit(wrapped, withSignedExtOverride(built.txOpts))
       const txHash = extractTxHash(res)
 
       hopProgresses[i] = { ...hopProgresses[i], status: 'success', txHash: txHash ?? undefined }

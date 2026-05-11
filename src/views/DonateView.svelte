@@ -527,9 +527,18 @@
         <div><span class="dim-text">Recipients:</span> {selectionCount()}</div>
         <div><span class="dim-text">Total:</span> {totalAmount ? formatBalance(totalAmount, decimals) : '—'} {token}</div>
         <div><span class="dim-text">Mode:</span> {txState.mode === 'batch' ? 'single batched signature' : `${selectedRecipients.length} signatures`}</div>
-        <div>
-          <span class="dim-text">Estimated fee:</span> {formatBalance(txState.fee, txState.feeDecimals)} {txState.feeSymbol}
-        </div>
+        <!--
+          The simple "Estimated fee" line from `getEstimatedFees` only covers
+          the dispatch fee — for cross-chain donations the real DOT/KSM cost
+          (bridge delivery + XCM execution + dispatch) is several × higher.
+          Show it only when the dry-run didn't produce a balance breakdown;
+          otherwise the "Net effect" section below is the authoritative view.
+        -->
+        {#if !txState.dryRun?.balance}
+          <div>
+            <span class="dim-text">Estimated fee:</span> {formatBalance(txState.fee, txState.feeDecimals)} {txState.feeSymbol}
+          </div>
+        {/if}
         {#if txState.dryRun}
           <div class="dry-run-summary">
             <span class="dim-text">Pre-flight checks:</span>
@@ -547,39 +556,69 @@
         {/if}
         {#if txState.dryRun?.balance}
           {@const bal = txState.dryRun.balance}
-          {@const usdcOutDryRun = bal.sourceUsdcDelta < 0n ? -bal.sourceUsdcDelta : 0n}
-          {@const feePaidInUsdc = txState.feeSymbol === 'USDC' ? txState.fee : 0n}
+          {@const paidInAsset = txState.feeSymbol === 'USDC'}
           <!--
-            `dry_run_call` doesn't run signed extensions, so the
-            asset-conversion-tx-payment USDC withdrawal isn't reflected in
-            `sourceUsdcDelta`. Add the estimated USDC fee so the user sees the
-            real total debited from their account.
+            `dry_run_call` doesn't run signed extensions, so the dispatch
+            fee withdrawal isn't reflected in `sourceUsdcDelta` /
+            `sourceNativeDelta`. Attribute it to the right side based on
+            the fee strategy chosen by `decideFeeStrategy`.
           -->
-          {@const usdcOut = usdcOutDryRun + feePaidInUsdc}
+          {@const dispatchFeeUsdc = paidInAsset ? txState.fee : 0n}
+          {@const dispatchFeeNative = paidInAsset ? (txState.feeNative ?? 0n) : txState.fee}
+          {@const usdcOutDryRun = bal.sourceUsdcDelta < 0n ? -bal.sourceUsdcDelta : 0n}
+          {@const usdcOut = usdcOutDryRun + dispatchFeeUsdc}
+          <!--
+            Split the USDC outflow into three buckets so the breakdown isn't
+            misleading:
+              donationOut    — what the user actually meant to send,
+              bridgeFunding  — USDC consumed by the prepended USDC→native
+                               swap that funds bridge-delivery / XCM-
+                               execution fees,
+              dispatchFeeUsdc — the dispatch fee paid via
+                               pallet-asset-conversion-tx-payment.
+            When the user picked USDC-only on PAH/KAH, `usdcOutDryRun`
+            captures (donation + swap-in), which is why naively labelling
+            the whole thing as "donation" overstates the gift.
+          -->
+          {@const donationOut = totalAmount ?? 0n}
+          {@const bridgeFunding = usdcOutDryRun > donationOut ? usdcOutDryRun - donationOut : 0n}
           {@const nativeDecimals = source === 'pah' ? 10 : 12}
           {@const nativeSymbol = source === 'pah' ? 'DOT' : 'KSM'}
-          {@const nativeAbs = bal.sourceNativeDelta < 0n ? -bal.sourceNativeDelta : bal.sourceNativeDelta}
-          {@const nativeSign = bal.sourceNativeDelta < 0n ? '−' : '+'}
-          {@const showNativeLine = bal.sourceNativeDelta !== 0n || (bal.sourceNativeFinal !== null && bal.sourceNativeFinal !== 0n)}
+          {@const adjustedNativeDelta = bal.sourceNativeDelta - dispatchFeeNative}
+          {@const nativeAbs = adjustedNativeDelta < 0n ? -adjustedNativeDelta : adjustedNativeDelta}
+          {@const nativeSign = adjustedNativeDelta < 0n ? '−' : '+'}
+          {@const showNativeLine = adjustedNativeDelta !== 0n || (bal.sourceNativeFinal !== null && bal.sourceNativeFinal !== 0n)}
+          <!-- Annotate the native delta when its meaning isn't the obvious
+               "balance change" reading:
+                 negative + non-native-token  → paid out as fees
+                 positive + non-native-token  → leftover from the USDC→native
+                                                swap topup the bridge didn't
+                                                fully consume.
+               Native-token transfers conflate transfer + fee in the delta;
+               no qualifier is correct there. -->
+          {@const nativeQualifier =
+            token === nativeSymbol ? '' :
+            adjustedNativeDelta < 0n ? ' (fees)' :
+            adjustedNativeDelta > 0n ? ' (fee swap remainder)' : ''}
+          {@const usdcParts = [
+            donationOut > 0n ? `${formatBalance(donationOut, 6)} donation` : null,
+            bridgeFunding > 0n ? `${formatBalance(bridgeFunding, 6)} swapped to ${nativeSymbol} for bridge` : null,
+            dispatchFeeUsdc > 0n ? `${formatBalance(dispatchFeeUsdc, 6)} dispatch fee` : null,
+          ].filter((p): p is string => p != null)}
           <div class="net-effect">
             <span class="dim-text">Net effect:</span>
             <ul>
               <li>
                 <span class="dim-text">USDC charged from your account:</span>
                 <span class="mono">{formatBalance(usdcOut, 6)} USDC</span>
-                {#if feePaidInUsdc > 0n}
-                  <span class="dim-text">
-                    ({formatBalance(usdcOutDryRun, 6)} donation + {formatBalance(feePaidInUsdc, 6)} fee)
-                  </span>
+                {#if usdcParts.length >= 2}
+                  <span class="dim-text">({usdcParts.join(' + ')})</span>
                 {/if}
               </li>
               {#if showNativeLine}
                 <li>
-                  <span class="dim-text">{nativeSymbol} change:</span>
+                  <span class="dim-text">{nativeSymbol} change{nativeQualifier}:</span>
                   <span class="mono">{nativeSign}{formatBalance(nativeAbs, nativeDecimals)} {nativeSymbol}</span>
-                  {#if bal.sourceNativeFinal !== null}
-                    <span class="dim-text">→ remaining {formatBalance(bal.sourceNativeFinal < 0n ? 0n : bal.sourceNativeFinal, nativeDecimals)} {nativeSymbol}</span>
-                  {/if}
                 </li>
               {/if}
               <li>
@@ -606,10 +645,18 @@
     <section class="card status-card">
       <span class="spinner"></span>
       <p>
-        {#if txState.mode === 'batch'}
-          Submitting batch...
+        {#if txState.phase === 'awaiting-signature'}
+          {#if txState.mode === 'batch'}
+            Waiting for signature in wallet...
+          {:else}
+            Waiting for signature {txState.current + 1} of {txState.total} in wallet...
+          {/if}
         {:else}
-          Submitting {txState.current + 1} of {txState.total}...
+          {#if txState.mode === 'batch'}
+            Waiting for block inclusion...
+          {:else}
+            Waiting for block inclusion ({txState.current + 1} of {txState.total})...
+          {/if}
         {/if}
       </p>
     </section>

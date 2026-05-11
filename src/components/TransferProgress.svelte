@@ -10,7 +10,8 @@
   function statusLabel(status: HopProgress['status']): string {
     switch (status) {
       case 'pending': return 'Waiting'
-      case 'signing': return 'Sign in wallet...'
+      case 'signing': return 'Waiting for signature in wallet...'
+      case 'awaiting-inclusion': return 'Waiting for block inclusion...'
       case 'submitted': return 'Submitting...'
       case 'success': return 'Done'
       case 'error': return 'Failed'
@@ -22,7 +23,7 @@
   {#each hops as hp, i}
     <div class="hop-row" class:error={hp.status === 'error'} class:success={hp.status === 'success'}>
       <span class="hop-icon">
-        {#if hp.status === 'signing' || hp.status === 'submitted'}
+        {#if hp.status === 'signing' || hp.status === 'awaiting-inclusion' || hp.status === 'submitted'}
           <span class="spinner spinner-sm"></span>
         {:else if hp.status === 'success'}
           &#x2714;
