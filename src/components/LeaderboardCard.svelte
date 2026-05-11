@@ -69,9 +69,9 @@
       {#if board.crossChainAnonymous.length > 0}
         {@const anonCount = board.crossChainAnonymous.length}
         {@const anonTotal = board.crossChainAnonymous.reduce((s, a) => s + BigInt(a.amountRaw), 0n)}
-        <li class="anonymous">
+        <li class="unidentified">
           <span class="rank">—</span>
-          <span class="donor"><span class="identity">Anonymous (via XCM)</span></span>
+          <span class="donor"><span class="identity">Unidentified (via XCM)</span></span>
           <span class="count">{anonCount}×</span>
           <span class="amount">{fmt(anonTotal)} {token}</span>
         </li>
@@ -154,7 +154,7 @@
     font-variant-numeric: tabular-nums;
     font-weight: 500;
   }
-  .anonymous .donor {
+  .unidentified .donor {
     color: var(--color-text-dim);
   }
 </style>
