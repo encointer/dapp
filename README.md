@@ -39,8 +39,11 @@ pnpm build
 ipfs add -r --cid-version=1 dist/
 ```
 
-gives you the ipfs cid like `bafybeiajpbmi4kveczt22bm5x27wahyaih6wutl5d5pyp6tdyufgjg6rua`. Publish that to IPNS:
+gives you the ipfs cid for `dist` like `bafybeiajpbmi4kveczt22bm5x27wahyaih6wutl5d5pyp6tdyufgjg6rua`. 
 
+Make sure you pin this cid with reliable gateways.
+
+Publish to IPNS to get a static link to the most recent version:
 ```
 ipfs name publish --key encointer bafybeiajpbmi4kveczt22bm5x27wahyaih6wutl5d5pyp6tdyufgjg6rua
 ```
