@@ -80,10 +80,20 @@
 </main>
 
 <footer>
-  Built with
-  <a href="https://papi.how/" target="_blank" rel="noopener">PAPI</a>
-  and
-  <a href="https://paraspell.xyz/" target="_blank" rel="noopener">ParaSpell</a>.
+  <p>
+    Built with
+    <a href="https://papi.how/" target="_blank" rel="noopener">PAPI</a>
+    and
+    <a href="https://paraspell.xyz/" target="_blank" rel="noopener">ParaSpell</a>.
+  </p>
+  <p class="ipfs-note">
+    For the censorship-resistant version, access this dapp via IPFS:
+    <a
+      href="https://ipfs.io/ipns/k51qzi5uqu5diyds91yhfs9ljvrtdi3c4zk4f2ut9m16svc7bb5iccf94xr7ak"
+      target="_blank"
+      rel="noopener"
+    >ipfs.io/ipns/k51qzi5…r7ak</a>
+  </p>
 </footer>
 
 <style>
@@ -103,6 +113,12 @@
     text-align: center;
     font-size: 0.75rem;
     color: var(--color-text-dim);
+  }
+  footer p {
+    margin: 0.25rem 0;
+  }
+  footer .ipfs-note {
+    margin-top: 0.5rem;
   }
   footer a {
     color: var(--color-text-dim);
