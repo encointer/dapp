@@ -444,9 +444,9 @@
         </div>
       </div>
 
-      {#if allBalancesZero}
+      {#if allBalancesZero || !wallet.connected}
         <div class="empty-balance-hint">
-          You don't hold {token} on any supported chain.
+          You don't hold {token} on any supported chain?
           {#if token === 'KSM'}
             Buy KSM on Polkadot Asset Hub with your credit card using <a href="https://subwallet.banxa.com/" target="_blank" rel="noopener">Banxa and Subwallet</a>
             Or acquire KSM on a major exchange — e.g.
