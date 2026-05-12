@@ -448,13 +448,15 @@
         <div class="empty-balance-hint">
           You don't hold {token} on any supported chain.
           {#if token === 'KSM'}
-            Acquire KSM on a major exchange — e.g.
+            Buy KSM on Polkadot Asset Hub with your credit card using <a href="https://subwallet.banxa.com/" target="_blank" rel="noopener">Banxa and Subwallet</a>
+            Or acquire KSM on a major exchange — e.g.
             <a href="https://www.binance.com/en/trade/KSM_USDT" target="_blank" rel="noopener">Binance</a>,
             <a href="https://www.kraken.com/prices/kusama" target="_blank" rel="noopener">Kraken</a>, or
             <a href="https://www.mexc.com/exchange/KSM_USDT" target="_blank" rel="noopener">MEXC</a> —
             and withdraw to your address on <strong>Asset Hub Kusama</strong>.
           {:else}
-            Withdraw USDC to your address on <strong>Asset Hub Polkadot</strong> from
+            Buy USDC on Polkadot Asset Hub with your credit card using <a href="https://subwallet.banxa.com/" target="_blank" rel="noopener">Banxa and Subwallet</a>
+            Or withdraw USDC to your address on <strong>Asset Hub Polkadot</strong> from
             <a href="https://www.gate.io/" target="_blank" rel="noopener">Gate.io</a>,
             <a href="https://www.binance.com/" target="_blank" rel="noopener">Binance</a>,
             <a href="https://www.kucoin.com/" target="_blank" rel="noopener">KuCoin</a>, or
