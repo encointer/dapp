@@ -43,11 +43,10 @@ describe('user story 2: KSM transfers', () => {
       // impossible.
       if (route.source === 'kah' && preState === 'usdc-only') continue
 
-      // KSM bridging across the Polkadot↔Kusama bridge isn't a routine user
-      // path: PAH considers BridgeHubKusama (not KAH) the reserve for KSM, so
-      // a `ReserveAssetDeposited` arriving from KAH with `parents:1, Here` is
-      // rejected with `UntrustedReserveLocation`. Out of scope for the dapp's
-      // tested flows; skip both directions.
+      // Bridge routes (PAH↔KAH) for KSM are covered by
+      // `relay-token-bridge.test.ts` (together with DOT). Skip them here to
+      // keep this file's matrix focused on the Kusama-side sibling teleport
+      // (KAH↔Encointer).
       if (route.bridge) continue
 
       const amount = 5n * 10n ** 11n // 0.5 KSM (12 decimals)

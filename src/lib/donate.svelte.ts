@@ -1038,14 +1038,18 @@ function extractTransferAssetsArgs(call: unknown): Record<string, unknown> | nul
  * `transfer_assets_using_type_and_then` lands. Bridge transit is assumed
  * transparent. The first instruction depends on `assets_transfer_type`:
  *
- *   - `LocalReserve` (origin holds reserve, e.g. PAH→KAH USDC)
+ *   - `LocalReserve` (origin holds reserve, e.g. PAH→KAH USDC / DOT)
  *     → destination receives `ReserveAssetDeposited` (mints mirror).
  *   - `DestinationReserve` (destination holds reserve, e.g. KAH→PAH USDC)
  *     → destination receives `WithdrawAsset` (releases canonical from sov).
  *
  * Returns the V5-wrapped XCM ready for `DryRunApi.dry_run_xcm`.
  */
-function buildArrivalXcmFromTransferArgs(args: Record<string, unknown>): unknown {
+function buildArrivalXcmFromTransferArgs(
+  args: Record<string, unknown>,
+  source: ChainId,
+  _dest: ChainId,
+): unknown {
   const assetsVer = args.assets as { value?: Array<{ id: unknown; fun: unknown }> } | undefined
   const sourceAssetEntry = assetsVer?.value?.[0]
   const customXcmVer = args.custom_xcm_on_dest as { value?: unknown[] } | undefined
@@ -1060,6 +1064,20 @@ function buildArrivalXcmFromTransferArgs(args: Record<string, unknown>): unknown
     if (x.type === 'BuyExecution' && x.value?.fees?.id) {
       destAssetId = x.value.fees.id
       break
+    }
+  }
+  // Paraspell quirk for relay-native tokens crossing a substrate bridge: it
+  // localizes DOT/KSM (source location {parents:1, Here}) as the X2[GC(origin),
+  // Para(1000)] form, but the destination AH registers the bridged foreign
+  // asset at the X1[GC(origin)] form. That mismatch makes `IsReserve` reject
+  // the synthesized `ReserveAssetDeposited` with `UntrustedReserveLocation`.
+  // For this specific case, override with the X1 form.
+  const srcLoc = sourceAssetEntry?.id as { parents?: number; interior?: { type?: string } } | undefined
+  if (srcLoc?.parents === 1 && srcLoc.interior?.type === 'Here' && (source === 'pah' || source === 'kah')) {
+    const originConsensus = source === 'pah' ? 'Polkadot' : 'Kusama'
+    destAssetId = {
+      parents: 2,
+      interior: { type: 'X1', value: [{ type: 'GlobalConsensus', value: { type: originConsensus } }] },
     }
   }
   if (!destAssetId || !sourceAssetEntry) return null
@@ -1386,7 +1404,7 @@ export async function dryRunFull(
   if (transferArgs) {
     const destChain = chainFromTransferDest(source, transferArgs.dest)
     if (destChain && destChain !== source) {
-      const arrivalXcm = buildArrivalXcmFromTransferArgs(transferArgs)
+      const arrivalXcm = buildArrivalXcmFromTransferArgs(transferArgs, source, destChain)
       const originLoc = originLocationFromTo(source, destChain)
       if (arrivalXcm && originLoc) {
         const r = await dryRunXcmOn(destChain, arrivalXcm, originLoc, `synthetic from ${source}`)
