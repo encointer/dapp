@@ -1,6 +1,6 @@
 endpoint:
-  - wss://polkadot-asset-hub-rpc.polkadot.io
   - wss://sys.ibp.network/statemint
+  - wss://polkadot-asset-hub-rpc.polkadot.io
 port: 8201
 mock-signature-host: true
 build-block-mode: Instant

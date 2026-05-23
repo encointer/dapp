@@ -1,6 +1,6 @@
 endpoint:
-  - wss://kusama-asset-hub-rpc.polkadot.io
   - wss://sys.ibp.network/statemine
+  - wss://kusama-asset-hub-rpc.polkadot.io
 port: 8101
 mock-signature-host: true
 build-block-mode: Instant

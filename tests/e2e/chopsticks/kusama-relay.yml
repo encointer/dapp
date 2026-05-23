@@ -1,4 +1,5 @@
 endpoint:
+  - wss://rpc.ibp.network/kusama
   - wss://kusama-rpc.polkadot.io
   - wss://kusama-rpc.dwellir.com
 port: 8100
