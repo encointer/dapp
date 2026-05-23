@@ -32,9 +32,10 @@ jobs:
       - name: Run e2e suite
         run: pnpm test:e2e
         env:
-          # Set DEBUG_CHOPSTICKS=1 for verbose chopsticks output if a future
-          # CI run regresses; off by default to keep the log readable.
-          DEBUG_CHOPSTICKS: ''
+          # Verbose chopsticks output: nightly+CI failures since 2026-05-19
+          # have stdio:'ignore' suppressing the actual chopsticks error, so
+          # turn it on while we diagnose. Once green again, revert to ''.
+          DEBUG_CHOPSTICKS: '1'
 
       - name: Upload chopsticks DBs on failure
         if: failure()

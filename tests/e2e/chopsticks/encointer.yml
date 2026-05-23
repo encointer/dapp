@@ -1,6 +1,6 @@
 endpoint:
-  - wss://kusama.api.encointer.org
   - wss://sys.ibp.network/encointer-kusama
+  - wss://kusama.api.encointer.org
   - wss://encointer-kusama-rpc.dwellir.com
 port: 8102
 mock-signature-host: true
