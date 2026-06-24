@@ -7,8 +7,9 @@ export const CHAINS: Record<ChainId, ChainConfig> = {
     name: 'Encointer',
     paraSpellName: 'Encointer',
     rpcEndpoints: [
-      'wss://sys.ibp.network/encointer-kusama',
+      'wss://kusama.api.encointer.org',
       'wss://encointer-kusama-rpc.dwellir.com',
+      'wss://rpc-encointer-kusama.luckyfriday.io'
     ],
     tokens: [{ symbol: 'KSM', decimals: 12 }],
   },
@@ -17,8 +18,8 @@ export const CHAINS: Record<ChainId, ChainConfig> = {
     name: 'Asset Hub Kusama',
     paraSpellName: 'AssetHubKusama',
     rpcEndpoints: [
-      'wss://sys.ibp.network/statemine',
       'wss://kusama-asset-hub-rpc.polkadot.io',
+      'wss://assethub-kusama.api.onfinality.io/public-ws'
     ],
     tokens: [
       { symbol: 'KSM', decimals: 12, currency: { symbol: Native('KSM') } },
@@ -48,8 +49,8 @@ export const CHAINS: Record<ChainId, ChainConfig> = {
     name: 'Asset Hub Polkadot',
     paraSpellName: 'AssetHubPolkadot',
     rpcEndpoints: [
-      'wss://sys.ibp.network/statemint',
       'wss://polkadot-asset-hub-rpc.polkadot.io',
+      'wss://statemint.api.onfinality.io/public-ws'
     ],
     tokens: [
       { symbol: 'KSM', decimals: 12, currency: { symbol: Foreign('KSM') } },
