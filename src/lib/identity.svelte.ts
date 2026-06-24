@@ -2,8 +2,8 @@
 import { AccountId, createClient, type PolkadotClient } from 'polkadot-api'
 import { getWsProvider } from 'polkadot-api/ws'
 
-const PEOPLE_KSM_RPC = 'wss://sys.ibp.network/people-kusama'
-const PEOPLE_DOT_RPC = 'wss://sys.ibp.network/people-polkadot'
+const PEOPLE_KSM_RPC = 'wss://kusama-people-rpc.polkadot.io'
+const PEOPLE_DOT_RPC = 'wss://polkadot-people-rpc.polkadot.io'
 
 // Identity registries are keyed by public key, not by ss58 prefix. The same
 // donor can have identity registered on either people-chain regardless of how
